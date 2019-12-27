@@ -24,9 +24,11 @@ int main()
 
 	Color3fD output = srgb_gamma(input);
 
+	std::cout << "test1" << std::endl;
 	FloatD loss = enoki::norm(output - Color3fD(.1f, .2f, .3f));
 	enoki::backward(loss);
-
+	std::cout << "test2" << std::endl;
 	std::cout << enoki::gradient(input) << std::endl;
+	std::cout << "test3" << std::endl;
 	return 0;
 }

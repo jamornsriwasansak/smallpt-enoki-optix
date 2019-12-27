@@ -5,31 +5,6 @@ if(UNIX AND NOT APPLE)
 	set(LINUX TRUE)
 endif()
 
-# Worst Framework Ever
-	# C++ Mode
-	set(CMAKE_CXX_STANDARD 17)
-	set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2 -DAVX2 -march=native")
-	set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG")
-
-	# output directory
-	set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/sandbox/archive")
-	set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/sandbox/library")
-	set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/sandbox")
-
-	# add the wurst sourcecode
-	file(GLOB_RECURSE wurst_src
-		"src/*.h"
-		"src/*.hpp"
-		"src/*.cpp"
-		"src/*.cc")
-	include_directories(src)
-	add_executable(wurstframework "${wurst_src}")
-
-	# some std libraries to fix problems
-	# target_link_libraries(wurstframework stdc++fs)
-
-#[[
 # Embree
 	set(EMBREE_ISA_AVX OFF CACHE BOOL "Enables AVX ISA" FORCE)
 	set(EMBREE_ISA_AVX2 ON CACHE BOOL "Enables AVX2 ISA" FORCE)
@@ -50,22 +25,47 @@ endif()
 	set(EMBREE_TUTORIALS OFF CACHE BOOL "Enable to build Embree tutorials" FORCE)
 	add_subdirectory(dependencies/embree)
 	include_directories(dependencies/embree/include)
-	target_link_libraries(wurstframework embree)
-]]
 
 # Enoki
-	set(ENOKI_CUDA "Build Enoki CUDA library?" FORCE)
-	set(ENOKI_AUTODIFF "Build Enoki automatic differentation library?" FORCE)
-	set(ENOKI_PYTHON "Build pybind11 interface to CUDA & automatic differentiation libraries?" FORCE)
+	find_package(cuda)
+	set(ENOKI_CUDA ON CACHE BOOL "Build Enoki CUDA library?" FORCE)
+	set(ENOKI_AUTODIFF ON CACHE BOOL "Build Enoki automatic differentation library?" FORCE)
+	set(ENOKI_PYTHON OFF CACHE BOOL "Build pybind11 interface to CUDA & automatic differentiation libraries?" FORCE)
 	add_subdirectory(dependencies/enoki)
 	include_directories(dependencies/enoki/include)
 
-#[[
 # pbrtParser
 	add_subdirectory(dependencies/pbrt-parser EXCLUDE_FROM_ALL)
 	include_directories(dependencies/pbrt-parser/pbrtParser/include)
-	target_link_libraries(wurstframework pbrtParser_static )
-]]
+
+# Worst Framework Ever
+	# C++ Mode
+	set(CMAKE_CXX_STANDARD 17)
+	set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DAVX2")
+	set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG")
+
+	# output directory
+	set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/sandbox/lib")
+	set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/sandbox/lib")
+	set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/sandbox")
+
+	# add the wurst sourcecode
+	file(GLOB_RECURSE wurst_src
+		"src/*.h"
+		"src/*.hpp"
+		"src/*.cpp"
+		"src/*.cc")
+	include_directories(src)
+	add_executable(wurstframework "${wurst_src}")
+	target_link_libraries(wurstframework embree)
+	target_link_libraries(wurstframework enoki-cuda enoki-autodiff)
+	target_link_libraries(wurstframework pbrtParser_static)
+
+	# Windows requires copying dlls of: enoki
+	add_custom_command(TARGET wurstframework POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/dependencies/enoki/enoki-cuda.dll ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/dependencies/enoki/enoki-autodiff.dll ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 
 # OpenGL and X11 for the viewer
 	find_package(OpenGL)

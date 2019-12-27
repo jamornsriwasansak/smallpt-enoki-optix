@@ -1,0 +1,9 @@
+[submodule "dependencies/enoki"]
+	path = dependencies/enoki
+	url = https://github.com/mitsuba-renderer/enoki.git
+[submodule "dependencies/embree"]
+	path = dependencies/embree
+	url = https://github.com/embree/embree.git
+[submodule "dependencies/pbrt-parser"]
+	path = dependencies/pbrt-parser
+	url = https://github.com/ingowald/pbrt-parser.git
