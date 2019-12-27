@@ -5,6 +5,8 @@ if(UNIX AND NOT APPLE)
 	set(LINUX TRUE)
 endif()
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 # Embree
 	set(EMBREE_ISA_AVX OFF CACHE BOOL "Enables AVX ISA" FORCE)
 	set(EMBREE_ISA_AVX2 ON CACHE BOOL "Enables AVX2 ISA" FORCE)
@@ -26,6 +28,11 @@ endif()
 	add_subdirectory(dependencies/embree)
 	include_directories(dependencies/embree/include)
 
+# Optix
+	set(OptiX_INSTALL_DIR "C:/ProgramData/NVIDIA Corporation/OptiX SDK 6.5.0")
+	find_package(OptiX)
+	include_directories("${OptiX_INCLUDE}")
+
 # Enoki
 	find_package(cuda)
 	set(ENOKI_CUDA ON CACHE BOOL "Build Enoki CUDA library?" FORCE)
@@ -34,9 +41,11 @@ endif()
 	add_subdirectory(dependencies/enoki)
 	include_directories(dependencies/enoki/include)
 
+#[[
 # pbrtParser
 	add_subdirectory(dependencies/pbrt-parser EXCLUDE_FROM_ALL)
 	include_directories(dependencies/pbrt-parser/pbrtParser/include)
+]]
 
 # Worst Framework Ever
 	# C++ Mode
@@ -60,7 +69,8 @@ endif()
 	add_executable(wurstframework "${wurst_src}")
 	target_link_libraries(wurstframework embree)
 	target_link_libraries(wurstframework enoki-cuda enoki-autodiff)
-	target_link_libraries(wurstframework pbrtParser_static)
+	target_link_libraries(wurstframework ${optix_LIBRARY})
+	#target_link_libraries(wurstframework pbrtParser_static)
 
 	# Windows requires copying dlls of: enoki
 	add_custom_command(TARGET wurstframework POST_BUILD

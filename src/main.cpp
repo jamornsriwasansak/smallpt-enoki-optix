@@ -3,6 +3,7 @@
 #include "enoki/array.h"
 #include "enoki/autodiff.h"
 #include "enoki/dynamic.h"
+#include "enoki/cuda.h"
 #include "enoki/stl.h"
 
 template <typename Value> Value srgb_gamma(Value x) {
@@ -18,6 +19,17 @@ int main()
 	using FloatC = enoki::CUDAArray<float>;
 	using FloatD = enoki::DiffArray<FloatC>;
 	using Color3fD = enoki::Array<FloatD, 3>;
+
+	FloatC f(1.0f);
+	FloatC g(1.0f);
+	std::cout << "f + g : " << f + g << std::endl;
+	std::cout << f.data() << std::endl;
+	std::cout << "f + g : " << f + g << std::endl;
+	std::cout << f.data() << std::endl;
+	std::cout << "f + g : " << f + g << std::endl;
+	std::cout << f.data() << std::endl;
+	std::cout << "f + g : " << f + g << std::endl;
+	std::cout << f.data() << std::endl;
 
 	Color3fD input = Color3fD(0.5f, 1.0f, 2.0f);
 	enoki::set_requires_gradient(input);
