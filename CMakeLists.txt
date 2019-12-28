@@ -28,12 +28,13 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 	add_subdirectory(dependencies/embree)
 	include_directories(dependencies/embree/include)
 
-# CUDA
+# CUDA (for Optix and Enoki)
 	enable_language(CUDA)
+	find_package(CUDA)
 	include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 	message(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 
-# Optix
+# Optix prime
 	set(OptiX_INSTALL_DIR "C:/ProgramData/NVIDIA Corporation/OptiX SDK 6.5.0")
 	find_package(OptiX)
 	include_directories("${OptiX_INCLUDE}")
@@ -71,17 +72,22 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 		"src/*.cc")
 	include_directories(src)
 	add_executable(wurstframework "${wurst_src}")
+	add_dependencies(wurstframework optixshaders)
 	target_link_libraries(wurstframework embree)
 	target_link_libraries(wurstframework enoki-cuda enoki-autodiff)
-	target_link_libraries(wurstframework ${optix_LIBRARY})
+	target_link_libraries(wurstframework ${CUDA_LIBRARIES})
+	target_link_libraries(wurstframework optix_prime)
 	#target_link_libraries(wurstframework pbrtParser_static)
 
 	# Windows requires copying dlls of: enoki, optix
 	add_custom_command(TARGET wurstframework POST_BUILD
+		# copy enoki dlls
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/dependencies/enoki/enoki-cuda.dll ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/dependencies/enoki/enoki-autodiff.dll ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+		
+		# copy optix dlls
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different "C:/ProgramData/NVIDIA Corporation/OptiX SDK 6.5.0/bin64/optix.6.5.0.dll" ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different "C:/ProgramData/NVIDIA Corporation/OptiX SDK 6.5.0/bin64/optixu.6.5.0.dll" ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "C:/ProgramData/NVIDIA Corporation/OptiX SDK 6.5.0/bin64/optix_prime.6.5.0.dll" ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 
 # OpenGL and X11 for the viewer
 	find_package(OpenGL)

@@ -7,3 +7,6 @@
 [submodule "dependencies/pbrt-parser"]
 	path = dependencies/pbrt-parser
 	url = https://github.com/ingowald/pbrt-parser.git
+[submodule "dependencies/tinyobjloader"]
+	path = dependencies/tinyobjloader
+	url = https://github.com/syoyo/tinyobjloader.git
