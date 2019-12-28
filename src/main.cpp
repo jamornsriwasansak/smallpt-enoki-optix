@@ -5,18 +5,22 @@
 #include <algorithm>
 
 #include <iostream>
-#include "enoki/cuda.h"
-#include "enoki/array.h"
-#include "enoki/autodiff.h"
-#include "enoki/dynamic.h"
-#include "enoki/cuda.h"
-#include "enoki/stl.h"
+
+#include <cuda_runtime.h>
+
+#include <enoki/cuda.h>
+#include <enoki/array.h>
+#include <enoki/autodiff.h>
+#include <enoki/cuda.h>
+#include <enoki/stl.h>
 
 #include <optix.h>
 #include <optix_prime/optix_prime.h>
 #include <optix_prime/optix_prime_declarations.h>
 #include <optix_prime/optix_primepp.h>
-#include <cuda_runtime.h>
+#include <optixu/optixu_math_namespace.h>
+
+#include <tiny_obj_loader.h>
 
 struct Ray
 {
@@ -38,18 +42,6 @@ struct Hit
 	float v;
 };
 
-struct HitInstancing
-{
-	static const RTPbufferformat format = RTP_BUFFER_FORMAT_HIT_T_TRIID_INSTID_U_V;
-
-	float t;
-	int   triId;
-	int   instId;
-	float u;
-	float v;
-};
-
-
 template <typename Value> Value srgb_gamma(Value x) {
 	return enoki::select(
 		x <= 0.0031308f,
@@ -58,8 +50,78 @@ template <typename Value> Value srgb_gamma(Value x) {
 	);
 }
 
+inline int idivCeil(int x, int y)
+{
+	return (x + y - 1) / y;
+}
+
+
+void createRaysOrtho(Ray ** rays, int width, int * height, const float3 & bbmin, const float3 & bbmax, float margin)
+{
+	float3 bbspan = bbmax - bbmin;
+
+	// set height according to aspect ratio of bounding box    
+	*height = (int)(width * bbspan.y / bbspan.x);
+
+	*rays = new Ray[width * *height];
+
+	float dx = bbspan.x * (1 + 2 * margin) / width;
+	float dy = bbspan.y * (1 + 2 * margin) / *height;
+	float x0 = bbmin.x - bbspan.x * margin + dx / 2;
+	float y0 = bbmin.y - bbspan.y * margin + dy / 2;
+	float z = bbmin.z - std::max(bbspan.z, 1.0f) * .001f;
+	int rows = idivCeil((*height - 0), 1);
+
+	float y = y0;
+	size_t idx = 0;
+	for (int iy = 0; iy < *height; iy += 1)
+	{
+		float x = x0;
+		for (int ix = 0; ix < width; ix++)
+		{
+			float tminOrMask = 0.0f;
+			Ray r = { make_float3(x,y,z), tminOrMask, make_float3(0,0,1), 1e34f };
+			(*rays)[idx++] = r;
+			x += dx;
+		}
+		y += dy * 1;
+	}
+}
+
 int main()
 {
+	// load mesh
+	tinyobj::ObjReader obj_reader;
+	tinyobj::ObjReaderConfig obj_reader_config;
+	obj_reader_config.triangulate = true;
+	obj_reader_config.vertex_color = false;
+	bool ret = obj_reader.ParseFromFile("cow.obj", obj_reader_config);
+
+	const tinyobj::attrib_t & tiny_attrib = obj_reader.GetAttrib();
+	const tinyobj::shape_t & tiny_shape = obj_reader.GetShapes()[0];
+
+	const size_t num_triangles = tiny_shape.mesh.num_face_vertices.size();
+	const size_t num_vertices = tiny_attrib.vertices.size() / 3;
+
+	int3 * triangles = new int3[num_triangles];
+	float3 * vertices = new float3[num_vertices];
+
+	// copy triangles
+	for (size_t i_face = 0; i_face < num_triangles; i_face++)
+	{
+		triangles[i_face].x = tiny_shape.mesh.indices[i_face * 3 + 0].vertex_index;
+		triangles[i_face].y = tiny_shape.mesh.indices[i_face * 3 + 1].vertex_index;
+		triangles[i_face].z = tiny_shape.mesh.indices[i_face * 3 + 2].vertex_index;
+	}
+
+	// copy vertices
+	for (size_t i_vertex = 0; i_vertex < num_vertices; i_vertex++)
+	{
+		vertices[i_vertex].x = tiny_attrib.vertices[i_vertex * 3 + 0];
+		vertices[i_vertex].y = tiny_attrib.vertices[i_vertex * 3 + 1];
+		vertices[i_vertex].z = tiny_attrib.vertices[i_vertex * 3 + 2];
+	}
+
 #if 1
 	RTPcontexttype context_type = RTP_CONTEXT_TYPE_CUDA;
 	RTPbuffertype buffer_type = RTP_BUFFER_TYPE_CUDA_LINEAR;
@@ -68,16 +130,11 @@ int main()
 	RTPbuffertype bufferType = RTP_BUFFER_TYPE_HOST;
 #endif
 
-	try
+	//try
 	{
 		optix::prime::Context context = optix::prime::Context::create(context_type);
 		unsigned int device = 0;
 		context->setCudaDeviceNumbers(1, &device);
-
-		int num_triangles = 0;
-		int num_vertices = 0;
-		int3 *triangles;
-		float3 * vertices;
 
 		// model
 		optix::prime::Model model = context->createModel();
@@ -86,21 +143,41 @@ int main()
 		model->update(RTPqueryhint::RTP_QUERY_HINT_NONE);
 
 		// query
-		optix::prime::Query query = model->createQuery(RTP_QUERY_TYPE_CLOSEST);
 		// TODO:: initialize hits and rays
+
+
+		int width = 640;
+
+#if 0
 		Hit * hits;
 		Ray * rays;
 		cudaMalloc(&rays, sizeof(Ray) * 100);
 		cudaMalloc(&hits, sizeof(Hit) * 100);
-		optix::prime::BufferDesc buffer_desc;
 		query->setRays(100, Ray::format, buffer_type, rays);
 		query->setHits(100, Hit::format, buffer_type, hits);
 		query->execute(RTPqueryhint::RTP_QUERY_HINT_NONE);
+#else
+		Hit * hits = nullptr;
+		Ray * rays = nullptr;
+		//rays = new Ray[width * height];
+		int height;
+		createRaysOrtho(&rays, width, &height, make_float3(-0.080734, -0.002271, -0.026525), make_float3(0.080813, 0.095336, 0.025957), 0.05f);
+		hits = new Hit[width * height];
+		optix::prime::Query query = model->createQuery(RTP_QUERY_TYPE_CLOSEST);
+		query->setRays(width * height, Ray::format, RTP_BUFFER_TYPE_HOST, rays);
+		query->setHits(width * height, Hit::format, RTP_BUFFER_TYPE_HOST, hits);
+		query->execute(0);
 
+		for (int i = 0; i < width * height; i++)
+		{
+			if (hits[i].triId != -1)
+				std::cout << hits[i].triId << std::endl;
+		}
+#endif
 	}
-	catch (const std::exception & e)
+	//catch (const std::exception & e)
 	{
-		std::cout << e.what() << std::endl;
+		//std::cout << e.what() << std::endl;
 	}
 
 	using FloatC = enoki::CUDAArray<float>;

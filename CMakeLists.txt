@@ -46,6 +46,11 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 	add_subdirectory(dependencies/enoki)
 	include_directories(dependencies/enoki/include)
 
+# TinyObjLoader
+	set(TINYOBJLOADER_USE_DOUBLE OFF CACHE BOOL "Build library with double precision instead of single (float)" FORCE)
+	add_subdirectory(dependencies/tinyobjloader)
+	include_directories(dependencies/tinyobjloader)
+
 #[[
 # pbrtParser
 	add_subdirectory(dependencies/pbrt-parser EXCLUDE_FROM_ALL)
@@ -77,6 +82,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 	target_link_libraries(wurstframework enoki-cuda enoki-autodiff)
 	target_link_libraries(wurstframework ${CUDA_LIBRARIES})
 	target_link_libraries(wurstframework optix_prime)
+	target_link_libraries(wurstframework tinyobjloader)
 	#target_link_libraries(wurstframework pbrtParser_static)
 
 	# Windows requires copying dlls of: enoki, optix
