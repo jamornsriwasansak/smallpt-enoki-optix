@@ -28,13 +28,17 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 	add_subdirectory(dependencies/embree)
 	include_directories(dependencies/embree/include)
 
+# CUDA
+	enable_language(CUDA)
+	include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+	message(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+
 # Optix
 	set(OptiX_INSTALL_DIR "C:/ProgramData/NVIDIA Corporation/OptiX SDK 6.5.0")
 	find_package(OptiX)
 	include_directories("${OptiX_INCLUDE}")
 
 # Enoki
-	find_package(cuda)
 	set(ENOKI_CUDA ON CACHE BOOL "Build Enoki CUDA library?" FORCE)
 	set(ENOKI_AUTODIFF ON CACHE BOOL "Build Enoki automatic differentation library?" FORCE)
 	set(ENOKI_PYTHON OFF CACHE BOOL "Build pybind11 interface to CUDA & automatic differentiation libraries?" FORCE)
@@ -72,10 +76,12 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 	target_link_libraries(wurstframework ${optix_LIBRARY})
 	#target_link_libraries(wurstframework pbrtParser_static)
 
-	# Windows requires copying dlls of: enoki
+	# Windows requires copying dlls of: enoki, optix
 	add_custom_command(TARGET wurstframework POST_BUILD
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/dependencies/enoki/enoki-cuda.dll ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/dependencies/enoki/enoki-autodiff.dll ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/dependencies/enoki/enoki-autodiff.dll ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "C:/ProgramData/NVIDIA Corporation/OptiX SDK 6.5.0/bin64/optix.6.5.0.dll" ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "C:/ProgramData/NVIDIA Corporation/OptiX SDK 6.5.0/bin64/optixu.6.5.0.dll" ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 
 # OpenGL and X11 for the viewer
 	find_package(OpenGL)

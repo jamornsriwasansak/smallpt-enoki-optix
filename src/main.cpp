@@ -1,3 +1,7 @@
+#define NOMINMAX
+#include <Windows.h>
+#include <algorithm>
+
 #include <iostream>
 #include "enoki/cuda.h"
 #include "enoki/array.h"
@@ -5,6 +9,8 @@
 #include "enoki/dynamic.h"
 #include "enoki/cuda.h"
 #include "enoki/stl.h"
+#include <optix.h>
+#include <optixu/optixpp.h>
 
 template <typename Value> Value srgb_gamma(Value x) {
 	return enoki::select(
@@ -16,6 +22,8 @@ template <typename Value> Value srgb_gamma(Value x) {
 
 int main()
 {
+	optix::Context optixContext = optix::Context::create();
+
 	using FloatC = enoki::CUDAArray<float>;
 	using FloatD = enoki::DiffArray<FloatC>;
 	using Color3fD = enoki::Array<FloatD, 3>;
