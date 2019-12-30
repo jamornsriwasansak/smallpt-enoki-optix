@@ -54,26 +54,6 @@ Ray3C enokiCreateRaysOrtho(int width, int * height, const float3 & bbmin, const 
 	return result;
 }
 
-RealC primeRaysFromRays(const Ray3C & rays)
-{
-	RealC prime_rays = zero<RealC>(rays.m_origin.x().size() * 8);
-	auto indices = arange<IntC>(rays.m_origin.x().size()) * 8;
-	scatter(prime_rays, rays.m_origin.x(), indices + 0);
-	scatter(prime_rays, rays.m_origin.y(), indices + 1);
-	scatter(prime_rays, rays.m_origin.z(), indices + 2);
-	scatter(prime_rays, rays.m_tmin, indices + 3);
-	scatter(prime_rays, rays.m_dir.x(), indices + 4);
-	scatter(prime_rays, rays.m_dir.y(), indices + 5);
-	scatter(prime_rays, rays.m_dir.z(), indices + 6);
-	scatter(prime_rays, rays.m_tmax, indices + 7);
-	return prime_rays;
-}
-
-struct Test
-{
-	float x;
-};
-
 int main()
 {
 	// load mesh
