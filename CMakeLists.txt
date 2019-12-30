@@ -8,6 +8,7 @@ endif()
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Embree
+#[[
 	set(EMBREE_ISA_AVX OFF CACHE BOOL "Enables AVX ISA" FORCE)
 	set(EMBREE_ISA_AVX2 ON CACHE BOOL "Enables AVX2 ISA" FORCE)
 	set(EMBREE_ISA_SSE2 OFF CACHE BOOL "Enables SSE ISA" FORCE)
@@ -27,6 +28,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 	set(EMBREE_TUTORIALS OFF CACHE BOOL "Enable to build Embree tutorials" FORCE)
 	add_subdirectory(dependencies/embree)
 	include_directories(dependencies/embree/include)
+]]
 
 # CUDA (for Optix and Enoki)
 	enable_language(CUDA)
@@ -78,7 +80,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 	include_directories(src)
 	add_executable(wurstframework "${wurst_src}")
 	add_dependencies(wurstframework optixshaders)
-	target_link_libraries(wurstframework embree)
+	#target_link_libraries(wurstframework embree)
 	target_link_libraries(wurstframework enoki-cuda enoki-autodiff)
 	target_link_libraries(wurstframework ${CUDA_LIBRARIES})
 	target_link_libraries(wurstframework optix_prime)
