@@ -11,6 +11,7 @@
 #include "accel/optix_prime_backend.h"
 #include "ray.h"
 #include "enoki_entry.h"
+#include "fimage.h"
 
 #include <optix.h>
 #include <optix_prime/optix_prime.h>
@@ -93,7 +94,24 @@ int main()
 	int width = 640;
 	int height;
 	Ray3C enoki_rays = enokiCreateRaysOrtho(width, &height, make_float3(-0.080734, -0.002271, -0.026525), make_float3(0.080813, 0.095336, 0.025957), 0.05f);
-	prime_backend.intersect(enoki_rays);
+	TriangleHitInfo hit_info = prime_backend.intersect(enoki_rays);
+
+	float * image = new float[width * height * 3];
+
+	for (int y = 0; y < height; y++)
+		for (int x = 0; x < width; x++)
+		{
+			if (hit_info.m_tri_id[x + y * width] != -1)
+			{
+				image[x + y * width] = 1;
+			}
+			else
+			{
+				image[x + y * width] = 0;
+			}
+		}
+
+	Fimage::save_pfm(image, width, height, "test.pfm");
 
 	return 0;
 }
