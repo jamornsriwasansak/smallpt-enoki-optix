@@ -8,11 +8,9 @@
 
 #include <cuda_runtime.h>
 
-#include <enoki/cuda.h>
-#include <enoki/array.h>
-#include <enoki/autodiff.h>
-#include <enoki/cuda.h>
-#include <enoki/stl.h>
+#include "accel/optix_prime_backend.h"
+#include "ray.h"
+#include "enoki_entry.h"
 
 #include <optix.h>
 #include <optix_prime/optix_prime.h>
@@ -20,33 +18,15 @@
 #include <optix_prime/optix_primepp.h>
 #include <optixu/optixu_math_namespace.h>
 
+#include <conio.h>
+
 #include <tiny_obj_loader.h>
 
-struct Ray
-{
-	static const RTPbufferformat format = RTP_BUFFER_FORMAT_RAY_ORIGIN_TMIN_DIRECTION_TMAX;
-
-	float3 origin;
-	float  tmin;
-	float3 dir;
-	float  tmax;
-};
-
-struct Hit
-{
-	static const RTPbufferformat format = RTP_BUFFER_FORMAT_HIT_T_TRIID_U_V;
-
-	float t;
-	int   triId;
-	float u;
-	float v;
-};
-
 template <typename Value> Value srgb_gamma(Value x) {
-	return enoki::select(
+	return select(
 		x <= 0.0031308f,
 		x * 12.92f,
-		enoki::pow(x * 1.055f, 1.f / 2.4f) - 0.055f
+		pow(x * 1.055f, 1.f / 2.4f) - 0.055f
 	);
 }
 
@@ -56,14 +36,14 @@ inline int idivCeil(int x, int y)
 }
 
 
-void createRaysOrtho(Ray ** rays, int width, int * height, const float3 & bbmin, const float3 & bbmax, float margin)
+void createRaysOrtho(PrimeRay ** rays, int width, int * height, const float3 & bbmin, const float3 & bbmax, float margin)
 {
 	float3 bbspan = bbmax - bbmin;
 
 	// set height according to aspect ratio of bounding box    
 	*height = (int)(width * bbspan.y / bbspan.x);
 
-	*rays = new Ray[width * *height];
+	*rays = new PrimeRay[width * *height];
 
 	float dx = bbspan.x * (1 + 2 * margin) / width;
 	float dy = bbspan.y * (1 + 2 * margin) / *height;
@@ -75,21 +55,68 @@ void createRaysOrtho(Ray ** rays, int width, int * height, const float3 & bbmin,
 	float y = y0;
 	size_t idx = 0;
 	for (int iy = 0; iy < *height; iy += 1)
-	{
-		float x = x0;
 		for (int ix = 0; ix < width; ix++)
 		{
-			float tminOrMask = 0.0f;
-			Ray r = { make_float3(x,y,z), tminOrMask, make_float3(0,0,1), 1e34f };
-			(*rays)[idx++] = r;
-			x += dx;
+			PrimeRay r = { x0+ix*dx,y0+iy*dy,z, 0.0f, 0,0,1, 1e34f };
+			(*rays)[idx + iy*(width) + ix] = r;
 		}
-		y += dy * 1;
-	}
 }
+
+Ray3C enokiCreateRaysOrtho(int width, int * height, const float3 & bbmin, const float3 & bbmax, const float margin)
+{
+	float3 bbspan = bbmax - bbmin;
+
+	// set height according to aspect ratio of bounding box    
+	//*rays = new PrimeRay[width * *height];
+	*height = (int)(width * bbspan.y / bbspan.x);
+
+	float dx = bbspan.x * (1 + 2 * margin) / width;
+	float dy = bbspan.y * (1 + 2 * margin) / *height;
+	float x0 = bbmin.x - bbspan.x * margin + dx / 2;
+	float y0 = bbmin.y - bbspan.y * margin + dy / 2;
+	float z = bbmin.z - std::max(bbspan.z, 1.0f) * .001f;
+	int rows = idivCeil((*height - 0), 1);
+
+	// get pixel index
+	int num_pixels = width * (*height);
+	auto pixel_index = arange<IntC>(num_pixels);
+
+	IntC y = pixel_index / width;
+	IntC x = pixel_index % width;
+
+	Vec3C origin(x0 + x * dx, y0 + y * dy, z);
+	Vec3C direction(0.0_f + x*0, 0.0_f + x*0, 1.0_f + x*0);
+
+	Ray3C result(origin, direction, 0.0, 1e34);
+	std::cout << result.m_origin << std::endl;
+	return result;
+}
+
+RealC primeRaysFromRays(const Ray3C & rays)
+{
+	RealC prime_rays = zero<RealC>(rays.m_origin.x().size() * 8);
+	auto indices = arange<IntC>(rays.m_origin.x().size()) * 8;
+	scatter(prime_rays, rays.m_origin.x(), indices + 0);
+	scatter(prime_rays, rays.m_origin.y(), indices + 1);
+	scatter(prime_rays, rays.m_origin.z(), indices + 2);
+	scatter(prime_rays, rays.m_tmin, indices + 3);
+	scatter(prime_rays, rays.m_dir.x(), indices + 4);
+	scatter(prime_rays, rays.m_dir.y(), indices + 5);
+	scatter(prime_rays, rays.m_dir.z(), indices + 6);
+	scatter(prime_rays, rays.m_tmax, indices + 7);
+	return prime_rays;
+}
+
+struct Test
+{
+	float x;
+};
 
 int main()
 {
+	//auto test = PCG32<RealC>(PCG32_DEFAULT_STATE, arange<RealC>(1000000));
+	//std::cout << test.next_float32() << std::endl;
+
 	// load mesh
 	tinyobj::ObjReader obj_reader;
 	tinyobj::ObjReaderConfig obj_reader_config;
@@ -121,6 +148,8 @@ int main()
 		vertices[i_vertex].y = tiny_attrib.vertices[i_vertex * 3 + 1];
 		vertices[i_vertex].z = tiny_attrib.vertices[i_vertex * 3 + 2];
 	}
+
+	//OptixPrimeBackend prime_backend;
 
 #if 1
 	RTPcontexttype context_type = RTP_CONTEXT_TYPE_CUDA;
@@ -157,21 +186,35 @@ int main()
 		query->setHits(100, Hit::format, buffer_type, hits);
 		query->execute(RTPqueryhint::RTP_QUERY_HINT_NONE);
 #else
-		Hit * hits = nullptr;
-		Ray * rays = nullptr;
+		PrimeHit * hits = nullptr;
+		PrimeRay * rays = nullptr;
+
 		//rays = new Ray[width * height];
 		int height;
-		createRaysOrtho(&rays, width, &height, make_float3(-0.080734, -0.002271, -0.026525), make_float3(0.080813, 0.095336, 0.025957), 0.05f);
-		hits = new Hit[width * height];
+		//createRaysOrtho(&rays, width, &height, make_float3(-0.080734, -0.002271, -0.026525), make_float3(0.080813, 0.095336, 0.025957), 0.05f);
+		Ray3C enokiRays = enokiCreateRaysOrtho(width, &height, make_float3(-0.080734, -0.002271, -0.026525), make_float3(0.080813, 0.095336, 0.025957), 0.05f);
+		RealC prime_rays = primeRaysFromRays(enokiRays);
+		std::cout << prime_rays << std::endl;
+		hits = new PrimeHit[width * height];
+
+		PrimeHit * hits_device = nullptr;
+		//PrimeRay * rays_device = nullptr;
+		cudaMalloc(&hits_device, sizeof(PrimeHit) * width * height);
+		//cudaMalloc(&rays_device, sizeof(PrimeRay) * width * height);
+		//cudaMemcpy(rays_device, rays, sizeof(PrimeHit) * width * height, cudaMemcpyKind::cudaMemcpyHostToDevice);
+
 		optix::prime::Query query = model->createQuery(RTP_QUERY_TYPE_CLOSEST);
-		query->setRays(width * height, Ray::format, RTP_BUFFER_TYPE_HOST, rays);
-		query->setHits(width * height, Hit::format, RTP_BUFFER_TYPE_HOST, hits);
+		//query->setRays(width * height, PrimeRay::Format, RTP_BUFFER_TYPE_CUDA_LINEAR, rays_device);
+		query->setRays(width * height, PrimeRay::Format, RTP_BUFFER_TYPE_CUDA_LINEAR, prime_rays.data());
+		query->setHits(width * height, PrimeHit::Format, RTP_BUFFER_TYPE_CUDA_LINEAR, hits_device);
 		query->execute(0);
+
+		cudaMemcpy(hits, hits_device, sizeof(PrimeHit) * width * height, cudaMemcpyKind::cudaMemcpyDeviceToHost);
 
 		for (int i = 0; i < width * height; i++)
 		{
-			if (hits[i].triId != -1)
-				std::cout << hits[i].triId << std::endl;
+			if (hits[i].m_tri_id != -1)
+				std::cout << hits[i].m_tri_id << std::endl;
 		}
 #endif
 	}
