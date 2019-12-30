@@ -74,8 +74,8 @@ struct OptixPrimeBackend
 	RealC prime_rays_from_rays(const Ray3C & rays)
 	{
 		const size_t num_rays = rays.m_origin.x().size();
-		const IntC indices = arange<IntC>(num_rays) * 8;
-		RealC prime_rays = zero<RealC>(num_rays * 8);
+		const IntC indices = arange<IntC>(num_rays) * PrimeRay::SizeInFloats;
+		RealC prime_rays = zero<RealC>(num_rays * PrimeRay::SizeInFloats);
 		scatter(prime_rays, rays.m_origin.x(), indices + 0);
 		scatter(prime_rays, rays.m_origin.y(), indices + 1);
 		scatter(prime_rays, rays.m_origin.z(), indices + 2);
@@ -89,12 +89,13 @@ struct OptixPrimeBackend
 
 	static TriangleHitInfo hit_info_from_prime_hit(const RealC & hits)
 	{
-		assert(hits.size() % PrimeHit::SizeInFloats == 0);
 		const size_t num_hits = hits.size() / PrimeHit::SizeInFloats;
-		const IntC indices = arange<IntC>(num_hits) / PrimeHit::SizeInFloats;
+		const IntC indices = arange<IntC>(num_hits) * PrimeHit::SizeInFloats;
 		const RealC t = gather<RealC>(hits, indices + 0);
 		const IntC tri_id = gather<IntC>(hits, indices + 1);
-		const Vec2C barycentric = gather<Vec2C>(hits, indices + 2);
+		const RealC barycentric_u = gather<RealC>(hits, indices + 2);
+		const RealC barycentric_v = gather<RealC>(hits, indices + 3);
+		Vec2C barycentric(barycentric_u, barycentric_v);
 		TriangleHitInfo result(t, tri_id, barycentric);
 		return result;
 	}
@@ -104,8 +105,13 @@ struct OptixPrimeBackend
 		RealC prime_rays = prime_rays_from_rays(rays);
 		size_t num_rays = rays.m_origin.x().size();
 		RealC prime_hits = zero<RealC>(num_rays * PrimeHit::SizeInFloats);
+		// cuda_eval is needed here to make sure that prime_rays and prime_hits are ready.
+		cuda_eval();
 		m_query->setRays(num_rays, PrimeRay::Format, RTP_BUFFER_TYPE_CUDA_LINEAR, prime_rays.data());
 		m_query->setHits(num_rays, PrimeHit::Format, RTP_BUFFER_TYPE_CUDA_LINEAR, prime_hits.data());
+		m_query->execute(0);
+		TriangleHitInfo result = hit_info_from_prime_hit(prime_hits);
+		return result;
 	}
 
 	optix::prime::Context	m_context;
