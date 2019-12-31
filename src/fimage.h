@@ -10,14 +10,14 @@ struct Fimage
 		std::ofstream os(filepath, std::ios::binary);
 		if (!os.is_open())
 		{
-			std::cout << "wtf" << std::endl;
+			std::cout << "slkdjflksjdlfkjsdf" << std::endl;
 		}
 		os << "PF" << std::endl;
 		os << width << " " << height << std::endl;
 		os << "-1" << std::endl;
 
 		// write data flip row
-		for (int y = height; y >= 1; y--)
+		for (int y = height - 1; y >= 0; y--)
 			for (int x = 0; x < width; x++)
 			{
 				for (int c = 0; c < 3; c++)

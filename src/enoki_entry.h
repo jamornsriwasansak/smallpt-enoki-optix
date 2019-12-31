@@ -45,34 +45,36 @@ using UIntC = CUDAArray<Uint>;
 
 // neat trick from https://github.com/yuanming-hu/taichi
 // in which he learned from https://github.com/hi2p-perim/lightmetrica-v2)
-Real operator"" _f(long double v)
+constexpr Real operator"" _f(long double v)
 {
 	return Real(v);
 }
 
-Real operator"" _f(unsigned long long v)
+constexpr Real operator"" _f(unsigned long long v)
 {
 	return Real(v);
 }
 
-using Vec2 = Array<Real, 2, false>;
-using Vec3 = Array<Real, 3, false>;
-using Vec4 = Array<Real, 4, false>;
-using Ivec2 = Array<Int, 2, false>;
-using Ivec3 = Array<Int, 3, false>;
-using Ivec4 = Array<Int, 4, false>;
-using Uvec2 = Array<Uint, 2, false>;
-using Uvec3 = Array<Uint, 3, false>;
-using Uvec4 = Array<Uint, 4, false>;
+using Real2 = Array<Real, 2, false>;
+using Real3 = Array<Real, 3, false>;
+using Real4 = Array<Real, 4, false>;
+using Int2 = Array<Int, 2, false>;
+using Int3 = Array<Int, 3, false>;
+using Int4 = Array<Int, 4, false>;
+using Uint2 = Array<Uint, 2, false>;
+using Uint3 = Array<Uint, 3, false>;
+using Uint4 = Array<Uint, 4, false>;
 using Mat4 = Matrix<Real, 4, false>;
 
-using Vec2P = Array<RealP, 2, false>;
-using Vec3P = Array<RealP, 3, false>;
-using Vec4P = Array<RealP, 4, false>;
+using Real2P = Array<RealP, 2, false>;
+using Real3P = Array<RealP, 3, false>;
+using Real4P = Array<RealP, 4, false>;
 
-using Vec2C = Array<RealC, 2, false>;
-using Vec3C = Array<RealC, 3, false>;
-using Vec4C = Array<RealC, 4, false>;
+using Real2C = Array<RealC, 2, false>;
+using Real3C = Array<RealC, 3, false>;
+using Real4C = Array<RealC, 4, false>;
+using Int2C = Array<IntC, 2, false>;
+using Int3C = Array<IntC, 3, false>;
 
 /*
 using Ivec2P = Array<Packet<int>, 2, false>;
@@ -89,7 +91,7 @@ using Mat4P = Matrix<Packet<Real>, 4, false>;
 */
 
 // note: changing this does not make the renderer automatically switch from right to left hand.
-const Vec3 UP = Vec3(0.0_f, 1.0_f, 0.0_f);
+const Real3 UP = Real3(0.0_f, 1.0_f, 0.0_f);
 
 const Real M_PI_f = Real(M_PI);
 const Real M_1_PI_f = Real(M_1_PI);

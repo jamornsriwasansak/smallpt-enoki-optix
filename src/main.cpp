@@ -12,6 +12,8 @@
 #include "ray.h"
 #include "enoki_entry.h"
 #include "fimage.h"
+#include "pinhole.h"
+#include "mapping.h"
 
 #include <optix.h>
 #include <optix_prime/optix_prime.h>
@@ -20,40 +22,6 @@
 #include <optixu/optixu_math_namespace.h>
 
 #include <tiny_obj_loader.h>
-
-inline int idivCeil(int x, int y)
-{
-	return (x + y - 1) / y;
-}
-
-Ray3C enokiCreateRaysOrtho(int width, int * height, const float3 & bbmin, const float3 & bbmax, const float margin)
-{
-	float3 bbspan = bbmax - bbmin;
-
-	// set height according to aspect ratio of bounding box    
-	//*rays = new PrimeRay[width * *height];
-	*height = (int)(width * bbspan.y / bbspan.x);
-
-	float dx = bbspan.x * (1 + 2 * margin) / width;
-	float dy = bbspan.y * (1 + 2 * margin) / *height;
-	float x0 = bbmin.x - bbspan.x * margin + dx / 2;
-	float y0 = bbmin.y - bbspan.y * margin + dy / 2;
-	float z = bbmin.z - std::max(bbspan.z, 1.0f) * .001f;
-	int rows = idivCeil((*height - 0), 1);
-
-	// get pixel index
-	int num_pixels = width * (*height);
-	auto pixel_index = arange<IntC>(num_pixels);
-
-	IntC y = pixel_index / width;
-	IntC x = pixel_index % width;
-
-	Vec3C origin(x0 + x * dx, y0 + y * dy, z);
-	Vec3C direction(0.0_f + x*0, 0.0_f + x*0, 1.0_f + x*0);
-
-	Ray3C result(origin, direction, 0.0, 1e34);
-	return result;
-}
 
 int main()
 {
@@ -91,17 +59,32 @@ int main()
 
 	OptixPrimeBackend prime_backend;
 	prime_backend.set_triangles_soup(triangles, num_triangles, vertices, num_vertices);
-	int width = 640;
-	int height;
-	Ray3C enoki_rays = enokiCreateRaysOrtho(width, &height, make_float3(-0.080734, -0.002271, -0.026525), make_float3(0.080813, 0.095336, 0.025957), 0.05f);
-	TriangleHitInfo hit_info = prime_backend.intersect(enoki_rays);
+	int width = 1920;
+	int height = 1080;
 
+	PCG32<RealC> rng(PCG32_DEFAULT_STATE, arange<RealC>(width * height));
+	int num_pixels = width * height;
+	const IntC pixel_index = arange<IntC>(num_pixels);
+	const IntC y = pixel_index / width;
+	const IntC x = pixel_index % width;
+	const Int2C pixel(x, y);
+	ThinlensCamera thinlens(Real3(0.0_f, 0.03_f, 0.2_f), Real3(0.0_f, 0.03_f, 0.0_f), Real3(0.0_f, 1.0_f, 0.0_f), 70.0_f / 180.0_f * M_PI);
+	Real3C origin = thinlens.m_origin + zero<Real3C>(width * height);
+	Real3C direction = thinlens.sample(pixel, Int2(width, height), rng.next_float32(), rng.next_float32());
+	Ray3C rays(origin, direction, 0.0_f, 1e20_f);
+	TriangleHitInfoC hit_info = prime_backend.intersect(rays);
+
+	// position
 	float * image = new float[width * height * 3];
+	float * p = new float[width * height * 3];
+	int * tri_id = new int[width * height];
+	cuda_fetch_element(p, hit_info.m_position.x().index_(), 0, sizeof(int) * width * height);
 
 	for (int y = 0; y < height; y++)
 		for (int x = 0; x < width; x++)
 		{
-			if (hit_info.m_tri_id[x + y * width] != -1)
+			/*
+			if (tri_id[x + y * width] != -1)
 			{
 				image[x + y * width] = 1;
 			}
@@ -109,6 +92,8 @@ int main()
 			{
 				image[x + y * width] = 0;
 			}
+			*/
+			image[x + y * width] = p[x + y * width];
 		}
 
 	Fimage::save_pfm(image, width, height, "test.pfm");

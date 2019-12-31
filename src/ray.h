@@ -30,6 +30,6 @@ struct Ray
 	Value	m_tmax;
 };
 
-using Ray3 = Ray<Vec3>;
-using Ray3P = Ray<Vec3P>;
-using Ray3C = Ray<Vec3C>;
+using Ray3 = Ray<Real3>;
+using Ray3P = Ray<Real3P>;
+using Ray3C = Ray<Real3C>;
