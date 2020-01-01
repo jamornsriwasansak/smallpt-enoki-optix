@@ -68,6 +68,7 @@ int main()
 	PCG32<RealC> rng(PCG32_DEFAULT_STATE, arange<RealC>(width * height));
 	for (int i = 0; i < 100; i++)
 	{
+		std::cout << i << std::endl;
 		int num_pixels = width * height;
 		const IntC pixel_index = arange<IntC>(num_pixels);
 		const IntC y = pixel_index / width;
@@ -75,7 +76,7 @@ int main()
 		const Int2C pixel(x, y);
 		ThinlensCamera thinlens(Real3(0.0_f, 0.03_f, 0.2_f), Real3(0.0_f, 0.03_f, 0.0_f), Real3(0.0_f, 1.0_f, 0.0_f), 70.0_f / 180.0_f * M_PI);
 		const Real3C origin = thinlens.m_origin + zero<Real3C>(width * height);
-		const Real3C direction = thinlens.sample(pixel, Int2(width, height), rng.next_float32(), rng.next_float32());
+		const Real3C direction = thinlens.sample_dir(pixel, Int2(width, height), rng.next_float32(), rng.next_float32());
 		const Ray3C rays(origin, direction, 0.0_f, 1e20_f);
 		const TriangleHitInfoC hit_info = prime_backend.intersect(rays);
 		const CoordFrame3C coord_frame(hit_info.m_geometry_normal);

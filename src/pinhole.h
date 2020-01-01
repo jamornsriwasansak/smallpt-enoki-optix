@@ -23,11 +23,18 @@ struct ThinlensCamera
 		m_y = normalize(cross(m_z, m_x));
 	}
 
-	Real3C sample(const Int2C & pixel, const Int2 & image_resolution, const RealC & sample0, const RealC & sample1)
+	Real3C sample_pos(const RealC & sample0, const RealC & sample1) const
 	{
+
+	}
+
+	Real3C sample_dir(const Int2C & pixel, const Int2 & image_resolution, const RealC & sample0, const RealC & sample1) const
+	{
+		Real3C position(sample0 * 0, sample0 * 0, sample0 * 0);
+		position += m_origin;
+
 		// compute distance from film to camera
 		const Real distance_lens_to_film = m_film_size_y * 0.5_f / tan(m_fov_y * 0.5_f);
-
 		const Real ratio_x_to_y = Real(image_resolution.x()) / Real(image_resolution.y());
 		const Real2 half_film_size(ratio_x_to_y * m_film_size_y * 0.5_f, m_film_size_y * 0.5_f);
 

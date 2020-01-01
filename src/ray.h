@@ -2,21 +2,29 @@
 
 #include "enoki_entry.h"
 
-template <typename Vector_>
+template <typename RealNT_>
 struct Ray
 {
-	using Vector = Vector_;
-	using Value = value_t<Vector>;
+	using RealNT = RealNT_;
+	using RealT = value_t<RealNT>;
 
 	Ray():
-		m_origin(Vector::zero_()),
-		m_dir(Vector::zero_()),
-		m_tmin(0),
-		m_tmax(1e34)
+		m_origin(RealNT::zero_()),
+		m_dir(RealNT::zero_()),
+		m_tmin(0.0_f),
+		m_tmax(1e34_f)
 	{
 	}
 
-	Ray(const Vector & origin, const Vector & dir, Value tmin, Value tmax) :
+	Ray(const RealNT & origin, const RealNT & dir):
+		m_origin(origin),
+		m_dir(dir),
+		m_tmin(0.0_f),
+		m_tmax(1e34_f)
+	{
+	}
+
+	Ray(const RealNT & origin, const RealNT & dir, RealT tmin, RealT tmax) :
 		m_origin(origin),
 		m_dir(dir),
 		m_tmin(tmin),
@@ -24,10 +32,10 @@ struct Ray
 	{
 	}
 
-	Vector	m_origin;
-	Vector	m_dir;
-	Value	m_tmin;
-	Value	m_tmax;
+	RealNT	m_origin;
+	RealNT	m_dir;
+	RealT	m_tmin;
+	RealT	m_tmax;
 };
 
 using Ray3 = Ray<Real3>;
