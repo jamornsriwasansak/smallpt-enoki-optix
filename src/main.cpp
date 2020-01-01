@@ -14,6 +14,7 @@
 #include "fimage.h"
 #include "pinhole.h"
 #include "mapping.h"
+#include "coordframe.h"
 
 #include <optix.h>
 #include <optix_prime/optix_prime.h>
@@ -62,41 +63,40 @@ int main()
 	int width = 1920;
 	int height = 1080;
 
+	RealC film = zero<RealC>(width * height);
+
 	PCG32<RealC> rng(PCG32_DEFAULT_STATE, arange<RealC>(width * height));
-	int num_pixels = width * height;
-	const IntC pixel_index = arange<IntC>(num_pixels);
-	const IntC y = pixel_index / width;
-	const IntC x = pixel_index % width;
-	const Int2C pixel(x, y);
-	ThinlensCamera thinlens(Real3(0.0_f, 0.03_f, 0.2_f), Real3(0.0_f, 0.03_f, 0.0_f), Real3(0.0_f, 1.0_f, 0.0_f), 70.0_f / 180.0_f * M_PI);
-	Real3C origin = thinlens.m_origin + zero<Real3C>(width * height);
-	Real3C direction = thinlens.sample(pixel, Int2(width, height), rng.next_float32(), rng.next_float32());
-	Ray3C rays(origin, direction, 0.0_f, 1e20_f);
-	TriangleHitInfoC hit_info = prime_backend.intersect(rays);
+	for (int i = 0; i < 100; i++)
+	{
+		int num_pixels = width * height;
+		const IntC pixel_index = arange<IntC>(num_pixels);
+		const IntC y = pixel_index / width;
+		const IntC x = pixel_index % width;
+		const Int2C pixel(x, y);
+		ThinlensCamera thinlens(Real3(0.0_f, 0.03_f, 0.2_f), Real3(0.0_f, 0.03_f, 0.0_f), Real3(0.0_f, 1.0_f, 0.0_f), 70.0_f / 180.0_f * M_PI);
+		const Real3C origin = thinlens.m_origin + zero<Real3C>(width * height);
+		const Real3C direction = thinlens.sample(pixel, Int2(width, height), rng.next_float32(), rng.next_float32());
+		const Ray3C rays(origin, direction, 0.0_f, 1e20_f);
+		const TriangleHitInfoC hit_info = prime_backend.intersect(rays);
+		const CoordFrame3C coord_frame(hit_info.m_geometry_normal);
 
-	// position
-	float * image = new float[width * height * 3];
-	float * p = new float[width * height * 3];
-	int * tri_id = new int[width * height];
-	cuda_fetch_element(p, hit_info.m_position.x().index_(), 0, sizeof(int) * width * height);
+		// sample out going direction
+		const Real3C second_direction = coord_frame.to_world(cosine_weighted_hemisphere_from_square(rng.next_float32(), rng.next_float32()));
+		const Ray3C second_rays(hit_info.m_position, second_direction, 0.01_f, 1e20_f);
+		const TriangleHitInfoC second_hit_info = prime_backend.intersect(second_rays);
 
-	for (int y = 0; y < height; y++)
-		for (int x = 0; x < width; x++)
-		{
-			/*
-			if (tri_id[x + y * width] != -1)
-			{
-				image[x + y * width] = 1;
-			}
-			else
-			{
-				image[x + y * width] = 0;
-			}
-			*/
-			image[x + y * width] = p[x + y * width];
-		}
+		film += select(eq(second_hit_info.m_tri_id, -1), zero<RealC>(num_pixels) + 1.0_f, zero<RealC>(num_pixels) + 0.0_f);
+	}
 
-	Fimage::save_pfm(image, width, height, "test.pfm");
+	film /= 100.0_f;
 
+	// image write
+	float * film_host = new float[width * height];
+	cuda_fetch_element(film_host, film.index_(), 0, sizeof(int) * width * height);
+
+	std::cout << "writing image" << std::endl;
+	Fimage::save_pfm(film_host, width, height, "test.pfm");
+
+	std::cout << "done" << std::endl;
 	return 0;
 }

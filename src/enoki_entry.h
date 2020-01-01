@@ -41,7 +41,7 @@ using RealC = CUDAArray<Real>;
 using RealPC = Packet<RealC, CudaPacketSize>;
 using IntC = CUDAArray<Int>;
 using IntPC = Packet<IntC, CudaPacketSize>;
-using UIntC = CUDAArray<Uint>;
+using UintC = CUDAArray<Uint>;
 
 // neat trick from https://github.com/yuanming-hu/taichi
 // in which he learned from https://github.com/hi2p-perim/lightmetrica-v2)

@@ -44,11 +44,13 @@ struct TriangleHitInfo
 	using Real2T = Array<RealT, 2, false>;
 	using Real3T = Array<RealT, 3, false>;
 
-	TriangleHitInfo(const RealT & t, const IntT & tri_id, const Real2T & barycentric, const Real3T & position):
+	TriangleHitInfo(const RealT & t, const IntT & tri_id, const Real2T & barycentric,
+					const Real3T & position, const Real3T & geometry_normal) :
 		m_t(t),
 		m_tri_id(tri_id),
 		m_barycentric(barycentric),
-		m_position(position)
+		m_position(position),
+		m_geometry_normal(geometry_normal)
 	{
 	}
 
@@ -56,8 +58,11 @@ struct TriangleHitInfo
 	IntT	m_tri_id;
 	Real2T	m_barycentric;
 	Real3T	m_position;
+	Real3T	m_geometry_normal;
+	//Real3T	m_shading_normal;
 };
 using TriangleHitInfoC = TriangleHitInfo<IntC, RealC>;
+using TriangleHitInfoS = TriangleHitInfo<Int, Real>;
 
 struct OptixPrimeBackend
 {
@@ -129,16 +134,14 @@ struct OptixPrimeBackend
 		const RealC barycentric_v = 1.0_f - barycentric_w - barycentric_u;
 		const Real2C barycentric(barycentric_u, barycentric_v);
 
-		// compute position
-		/*
+		// compute geometry normal
 		const Int3C tri_indices = gather<Int3C>(m_triangles, tri_id);
 		const Real3C p0 = gather<Real3C>(m_vertices, tri_indices.x());
 		const Real3C p1 = gather<Real3C>(m_vertices, tri_indices.y());
 		const Real3C p2 = gather<Real3C>(m_vertices, tri_indices.z());
-		const Real3C p = barycentric_interpolate(p0, p1, p2, barycentric);
-		*/
+		const Real3C n = compute_geometry_normal(p0, p1, p2);
 		const Real3C p = rays.m_origin + rays.m_dir * t;
-		TriangleHitInfoC result(t, tri_id, barycentric, p);
+		TriangleHitInfoC result(t, tri_id, barycentric, p, n);
 		return result;
 	}
 
