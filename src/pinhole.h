@@ -12,7 +12,7 @@ struct ThinlensCamera
 		m_film_size_y(film_size_y),
 		m_focal_dist(focal_dist),
 		m_fov_y(fov_y),
-		m_lens_area(M_PI * lens_radius * lens_radius),
+		m_lens_area(M_PI_f * lens_radius * lens_radius),
 		m_lens_radius(lens_radius)
 	{
 		m_origin = look_from;

@@ -4,7 +4,7 @@
 
 struct Fimage
 {
-	static void save_pfm(const float * image, const size_t width, const size_t height, const std::filesystem::path & filepath)
+	static void save_pfm_mono(const float * image, const size_t width, const size_t height, const std::filesystem::path & filepath)
 	{
 		// write PFM header
 		std::ofstream os(filepath, std::ios::binary);
@@ -17,12 +17,12 @@ struct Fimage
 		os << "-1" << std::endl;
 
 		// write data flip row
-		for (int y = height - 1; y >= 0; y--)
-			for (int x = 0; x < width; x++)
+		for (size_t y = 0; y < height; y++)
+			for (size_t x = 0; x < width; x++)
 			{
 				for (int c = 0; c < 3; c++)
 				{
-					float vf = image[y * width + x];
+					float vf = image[(height - y - 1) * width + x];
 					os.write((char *)(&vf), sizeof(float));
 				}
 			}

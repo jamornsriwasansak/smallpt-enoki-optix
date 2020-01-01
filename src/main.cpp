@@ -24,6 +24,45 @@
 
 #include <tiny_obj_loader.h>
 
+struct Bsdf
+{
+	virtual std::tuple<SpectrumC, Real3C> sample(const Real3C & incoming,
+												 const Real3C & texture_coord,
+												 const Real2C & sample) const = 0;
+};
+
+ENOKI_CALL_SUPPORT_BEGIN(Bsdf)
+ENOKI_CALL_SUPPORT_METHOD(sample)
+ENOKI_CALL_SUPPORT_END(Bsdf)
+
+struct LambertBsdf : public Bsdf
+{
+	LambertBsdf(const SpectrumC & reflectance): m_reflectance(reflectance)
+	{
+	}
+
+	std::tuple<SpectrumC, Real3C> sample(const Real3C & incoming,
+										 const Real3C & texture_coord,
+										 const Real2C & sample) const override
+	{
+		SpectrumC outgoing = cosine_weighted_hemisphere_from_square(sample);
+		return std::make_tuple(m_reflectance * M_1_PI_f, outgoing);
+	}
+
+	SpectrumC m_reflectance;
+};
+
+template <typename T>
+std::vector<T *> raw_ptrs(const std::vector<std::shared_ptr<T>> & shared_ptrs)
+{
+	std::vector<T *> result(shared_ptrs.size());
+	for (size_t i = 0; i < shared_ptrs.size(); i++)
+	{
+		result[i] = shared_ptrs[i].get();
+	}
+	return result;
+}
+
 int main()
 {
 	// load mesh
@@ -35,28 +74,44 @@ int main()
 
 	const tinyobj::attrib_t & tiny_attrib = obj_reader.GetAttrib();
 	const tinyobj::shape_t & tiny_shape = obj_reader.GetShapes()[0];
+	const std::vector<tinyobj::material_t> & tiny_mat = obj_reader.GetMaterials();
 
 	const size_t num_triangles = tiny_shape.mesh.num_face_vertices.size();
 	const size_t num_vertices = tiny_attrib.vertices.size() / 3;
+	const size_t num_materials = tiny_mat.size();
 
 	int3 * triangles = new int3[num_triangles];
+	int * material_id = new int[num_triangles];
 	float3 * vertices = new float3[num_vertices];
 
-	// copy triangles
 	for (size_t i_face = 0; i_face < num_triangles; i_face++)
 	{
+		// copy triangles
 		triangles[i_face].x = tiny_shape.mesh.indices[i_face * 3 + 0].vertex_index;
 		triangles[i_face].y = tiny_shape.mesh.indices[i_face * 3 + 1].vertex_index;
 		triangles[i_face].z = tiny_shape.mesh.indices[i_face * 3 + 2].vertex_index;
+
+		// copy per triangle material id
+		material_id[i_face] = tiny_shape.mesh.material_ids[i_face] + 1;
 	}
 
-	// copy vertices
 	for (size_t i_vertex = 0; i_vertex < num_vertices; i_vertex++)
 	{
+		// copy vertices
 		vertices[i_vertex].x = tiny_attrib.vertices[i_vertex * 3 + 0];
 		vertices[i_vertex].y = tiny_attrib.vertices[i_vertex * 3 + 1];
 		vertices[i_vertex].z = tiny_attrib.vertices[i_vertex * 3 + 2];
 	}
+
+	std::vector<std::shared_ptr<Bsdf>> materials_host;
+	materials_host.push_back(std::make_shared<LambertBsdf>(SpectrumC(1.0_f)));
+	for (size_t i_material = 0; i_material < num_materials; i_material++)
+	{
+		materials_host.push_back(std::make_shared<LambertBsdf>(SpectrumC(0.5_f)));
+	}
+
+	//CUDAArray<Bsdf *> materials = copy(raw_ptrs_from_shared_ptrs<Bsdf>(materials_host));
+	CUDAArray<Bsdf *> materials = CUDAArray<Bsdf *>::copy(raw_ptrs(materials_host).data(), materials_host.size());
 
 	OptixPrimeBackend prime_backend;
 	prime_backend.set_triangles_soup(triangles, num_triangles, vertices, num_vertices);
@@ -66,7 +121,8 @@ int main()
 	RealC film = zero<RealC>(width * height);
 
 	PCG32<RealC> rng(PCG32_DEFAULT_STATE, arange<RealC>(width * height));
-	for (int i = 0; i < 50; i++)
+	int num_samples = 1000;
+	for (int i = 0; i < num_samples; i++)
 	{
 		std::cout << i << std::endl;
 		int num_pixels = width * height;
@@ -82,21 +138,21 @@ int main()
 		const Frame3C coord_frame(hit_info.m_geometry_normal);
 
 		// sample out going direction
-		const Real3C second_direction = coord_frame.to_world(cosine_weighted_hemisphere_from_square(rng.next_float32(), rng.next_float32()));
-		const Ray3C second_rays(hit_info.m_position, second_direction, 0.01_f, 1e20_f);
+		const Real3C second_direction = coord_frame.to_world(cosine_weighted_hemisphere_from_square(Real2C(rng.next_float32(), rng.next_float32())));
+		const Ray3C second_rays(hit_info.m_position, second_direction, 0.0001_f, 1e20_f);
 		const TriangleHitInfoC second_hit_info = prime_backend.intersect(second_rays);
 
-		film += select(eq(second_hit_info.m_tri_id, -1), zero<RealC>(num_pixels) + 1.0_f, zero<RealC>(num_pixels) + 0.0_f);
+		film += select(neq(hit_info.m_tri_id, -1) && eq(second_hit_info.m_tri_id, -1), zero<RealC>(num_pixels) + 1.0_f, zero<RealC>(num_pixels) + 0.0_f);
 	}
 
-	film /= 50.0_f;
+	film /= Real(num_samples);
 
 	// image write
 	float * film_host = new float[width * height];
 	cuda_fetch_element(film_host, film.index_(), 0, sizeof(int) * width * height);
 
 	std::cout << "writing image" << std::endl;
-	Fimage::save_pfm(film_host, width, height, "test.pfm");
+	Fimage::save_pfm_mono(film_host, width, height, "test.pfm");
 
 	std::cout << "done" << std::endl;
 	return 0;

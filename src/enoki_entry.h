@@ -29,9 +29,9 @@ using Uint64 = uint64_t;
 using namespace enoki;
 
 #ifdef USE_DOUBLE_PRECISION
-	using Real = double;
+using Real = double;
 #else
-	using Real = float;
+using Real = float;
 #endif
 using Int = int;
 using Uint = unsigned int;
@@ -101,3 +101,19 @@ const Real SmallValue = 1e-12;
 #else
 const Real SmallValue = 1e-4_f;
 #endif
+
+template <typename Value_, size_t Size_, bool Approx_, RoundingMode Mode_>
+struct SpectrumT : enoki::StaticArrayImpl<Value_, Size_, Approx_, Mode_, false, SpectrumT<Value_, Size_, Approx_, Mode_>>
+{
+    using Base = enoki::StaticArrayImpl<Value_, Size_, Approx_, Mode_, false, SpectrumT<Value_, Size_, Approx_, Mode_>>;
+    using ArrayType = SpectrumT;
+    using MaskType = Mask<Value_, Size_, Approx_, Mode_>;
+    template <typename T>
+    using ReplaceValue = SpectrumT<T, Size_,
+        is_std_float_v<scalar_t<T>> && is_std_float_v<scalar_t<Value_>>
+        ? Approx_ : array_approx_v<scalar_t<T>>,
+        is_std_float_v<scalar_t<T>> && is_std_float_v<scalar_t<Value_>>
+        ? Mode_ : RoundingMode::Default>;
+    ENOKI_ARRAY_IMPORT(Base, SpectrumT)
+};
+using SpectrumC = SpectrumT<RealC, 3, false, RoundingMode::Default>;
