@@ -1,3 +1,5 @@
+#pragma once
+
 #include "enoki_entry.h"
 
 inline Real3C cosine_weighted_hemisphere_from_square(const RealC & sample0, const RealC & sample1)
@@ -10,7 +12,7 @@ inline Real3C cosine_weighted_hemisphere_from_square(const RealC & sample0, cons
 
 // taken from Dave Cline from Peter Shirley from http://psgraphics.blogspot.jp/2011/01/improved-code-for-concentric-map.html
 // and https://github.com/mmp/pbrt-v3/blob/7095acfd8331cdefb03fe0bcae32c2fc9bd95980/src/core/sampling.cpp
-static inline Real2C DiskFromSquare(const Real2C & sample)
+inline Real2C disk_from_square(const Real2C & sample)
 {
 	const Real2C ab = sample * 2.0_f - 1.0_f;
 	const Real2C ab2 = sqr(ab);

@@ -38,6 +38,6 @@ struct Ray
 	RealT	m_tmax;
 };
 
-using Ray3 = Ray<Real3>;
+using Ray3S = Ray<Real3>;
 using Ray3P = Ray<Real3P>;
 using Ray3C = Ray<Real3C>;

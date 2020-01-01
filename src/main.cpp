@@ -66,7 +66,7 @@ int main()
 	RealC film = zero<RealC>(width * height);
 
 	PCG32<RealC> rng(PCG32_DEFAULT_STATE, arange<RealC>(width * height));
-	for (int i = 0; i < 100; i++)
+	for (int i = 0; i < 50; i++)
 	{
 		std::cout << i << std::endl;
 		int num_pixels = width * height;
@@ -74,12 +74,12 @@ int main()
 		const IntC y = pixel_index / width;
 		const IntC x = pixel_index % width;
 		const Int2C pixel(x, y);
-		ThinlensCamera thinlens(Real3(0.0_f, 0.03_f, 0.2_f), Real3(0.0_f, 0.03_f, 0.0_f), Real3(0.0_f, 1.0_f, 0.0_f), 70.0_f / 180.0_f * M_PI);
-		const Real3C origin = thinlens.m_origin + zero<Real3C>(width * height);
-		const Real3C direction = thinlens.sample_dir(pixel, Int2(width, height), rng.next_float32(), rng.next_float32());
+		ThinlensCamera thinlens(Real3(0.0_f, 0.03_f, 0.2_f), Real3(0.0_f, 0.03_f, 0.0_f), Real3(0.0_f, 1.0_f, 0.0_f), 0.00_f, 1.0_f, 70.0_f / 180.0_f * M_PI_f);
+		const Real3C origin = thinlens.sample_pos(Real2C(rng.next_float32(), rng.next_float32()));
+		const Real3C direction = thinlens.sample_dir(pixel, origin, Int2(width, height), Real2C(rng.next_float32(), rng.next_float32()));
 		const Ray3C rays(origin, direction, 0.0_f, 1e20_f);
 		const TriangleHitInfoC hit_info = prime_backend.intersect(rays);
-		const CoordFrame3C coord_frame(hit_info.m_geometry_normal);
+		const Frame3C coord_frame(hit_info.m_geometry_normal);
 
 		// sample out going direction
 		const Real3C second_direction = coord_frame.to_world(cosine_weighted_hemisphere_from_square(rng.next_float32(), rng.next_float32()));
@@ -89,7 +89,7 @@ int main()
 		film += select(eq(second_hit_info.m_tri_id, -1), zero<RealC>(num_pixels) + 1.0_f, zero<RealC>(num_pixels) + 0.0_f);
 	}
 
-	film /= 100.0_f;
+	film /= 50.0_f;
 
 	// image write
 	float * film_host = new float[width * height];

@@ -1,13 +1,19 @@
+#pragma once
+
 #include "enoki_entry.h"
 
 template <typename Real_>
-struct CoordFrame3
+struct Frame3
 {
 	using RealT		= Real_;
 	using Real3T	= Array<RealT, 3, false>;
 	using Mat3T		= Matrix<RealT, 3, false>;
 
-	CoordFrame3(const Real3T & normal)
+	Frame3(): m_world_from_local(empty<Mat3T>())
+	{
+	}
+
+	Frame3(const Real3T & normal)
 	{
 		const RealT sign = copysign(1.0_f, normal.y());
 		const RealT a = -1.0_f / (sign + normal.y());
@@ -21,12 +27,21 @@ struct CoordFrame3
 								   basis_x.z(), basis_y.z(), basis_z.z());
 	}
 
-	Real3T to_local(const Real3T & world) const
+	Frame3(const Real3T & basis_x, const Real3T & basis_y, const Real3T & basis_z)
+	{
+		m_world_from_local = Mat3T(basis_x.x(), basis_y.x(), basis_z.x(),
+								   basis_x.y(), basis_y.y(), basis_z.y(),
+								   basis_x.z(), basis_y.z(), basis_z.z());
+	}
+
+	template <typename Real3TT>
+	Real3TT to_local(const Real3TT & world) const
 	{
 		return transpose(m_world_from_local) * world;
 	}
 
-	Real3T to_world(const Real3T & local) const
+	template <typename Real3TT>
+	Real3TT to_world(const Real3TT & local) const
 	{
 		return m_world_from_local * local;
 	}
@@ -34,4 +49,5 @@ struct CoordFrame3
 	Mat3T m_world_from_local;
 };
 
-using CoordFrame3C = CoordFrame3<RealC>;
+using Frame3C = Frame3<RealC>;
+using Frame3S = Frame3<Real>;
