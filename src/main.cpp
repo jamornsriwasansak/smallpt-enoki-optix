@@ -16,12 +16,6 @@
 #include "mapping.h"
 #include "coordframe.h"
 
-#include <optix.h>
-#include <optix_prime/optix_prime.h>
-#include <optix_prime/optix_prime_declarations.h>
-#include <optix_prime/optix_primepp.h>
-#include <optixu/optixu_math_namespace.h>
-
 #include <tiny_obj_loader.h>
 
 struct Bsdf

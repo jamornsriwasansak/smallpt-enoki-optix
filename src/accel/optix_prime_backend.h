@@ -152,8 +152,8 @@ struct OptixPrimeBackend
 		RealC prime_hits = zero<RealC>(num_rays * PrimeHit::SizeInFloats);
 		// cuda_eval is needed here to make sure that prime_rays and prime_hits are ready.
 		cuda_eval();
-		m_query->setRays(num_rays, PrimeRay::Format, RTP_BUFFER_TYPE_CUDA_LINEAR, prime_rays.data());
-		m_query->setHits(num_rays, PrimeHit::Format, RTP_BUFFER_TYPE_CUDA_LINEAR, prime_hits.data());
+		m_query->setRays(num_rays, PrimeRay::Format, buffer_type, prime_rays.data());
+		m_query->setHits(num_rays, PrimeHit::Format, buffer_type, prime_hits.data());
 		m_query->execute(0);
 		TriangleHitInfoC result = hit_info_from_prime_hit(rays, prime_hits);
 		return result;
