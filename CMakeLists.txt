@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 2.8)
+cmake_policy(SET CMP0054 NEW) # avoid CMP0054 policy violiations
 project(wurstframework)
 
 if(UNIX AND NOT APPLE)
@@ -36,8 +37,8 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 	include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 	message(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 
-# Optix prime
-	set(OptiX_INSTALL_DIR "C:/ProgramData/NVIDIA Corporation/OptiX SDK 6.5.0")
+# Optix
+	set(OptiX_INSTALL_DIR "C:/ProgramData/NVIDIA Corporation/OptiX SDK 7.0.0")
 	find_package(OptiX)
 	include_directories("${OptiX_INCLUDE}")
 
@@ -79,23 +80,26 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 		"src/*.cc")
 	include_directories(src)
 	add_executable(wurstframework "${wurst_src}")
-	add_dependencies(wurstframework optixshaders)
+
+	# compile .cu to .ptx
+	add_library(wurstframework_ptx OBJECT kernel_test.cu)
+	set_property(TARGET wurstframework_ptx PROPERTY CUDA_PTX_COMPILATION ON)
+	add_dependencies(wurstframework wurstframework_ptx)
+
 	#target_link_libraries(wurstframework embree)
 	target_link_libraries(wurstframework enoki-cuda enoki-autodiff)
 	target_link_libraries(wurstframework ${CUDA_LIBRARIES})
-	target_link_libraries(wurstframework optix_prime)
 	target_link_libraries(wurstframework tinyobjloader)
 	#target_link_libraries(wurstframework pbrtParser_static)
 
-	# Windows requires copying dlls of: enoki, optix
+	# copy all required files: enoki dlls and .ptx files
 	add_custom_command(TARGET wurstframework POST_BUILD
 		# copy enoki dlls
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/dependencies/enoki/enoki-cuda.dll ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/dependencies/enoki/enoki-autodiff.dll ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
 		
-		# copy optix dlls
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different "C:/ProgramData/NVIDIA Corporation/OptiX SDK 6.5.0/bin64/optix.6.5.0.dll" ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different "C:/ProgramData/NVIDIA Corporation/OptiX SDK 6.5.0/bin64/optix_prime.6.5.0.dll" ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+		# copy all .ptx
+		COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/CMakeFiles/wurstframework_ptx.dir/ ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ptxfiles)
 
 # OpenGL and X11 for the viewer
 	find_package(OpenGL)

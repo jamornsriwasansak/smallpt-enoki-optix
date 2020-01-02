@@ -8,7 +8,7 @@
 
 #include <cuda_runtime.h>
 
-#include "accel/optix_prime_backend.h"
+#include "accel/optix_backend.h"
 #include "ray.h"
 #include "enoki_entry.h"
 #include "fimage.h"
@@ -107,7 +107,7 @@ int main()
 	}
 	CUDAArray<Bsdf *> materials = CUDAArray<Bsdf *>::copy(raw_ptrs(materials_host).data(), materials_host.size());
 
-	OptixPrimeBackend prime_backend;
+	OptixBackend prime_backend;
 	prime_backend.set_triangles_soup(triangles_host, num_triangles, vertices_host, num_vertices);
 	int width = 1920;
 	int height = 1080;
