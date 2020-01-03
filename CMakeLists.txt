@@ -81,8 +81,10 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 	include_directories(src)
 	add_executable(wurstframework "${wurst_src}")
 
-	# compile .cu to .ptx
-	add_library(wurstframework_ptx OBJECT kernel_test.cu)
+	# add cuda source and compile .cu to .ptx
+	file(GLOB_RECURSE wurst_cu_src
+		"src/*.cu")
+	add_library(wurstframework_ptx OBJECT "${wurst_cu_src}")
 	set_property(TARGET wurstframework_ptx PROPERTY CUDA_PTX_COMPILATION ON)
 	add_dependencies(wurstframework wurstframework_ptx)
 
