@@ -95,13 +95,14 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 	#target_link_libraries(wurstframework pbrtParser_static)
 
 	# copy all required files: enoki dlls and .ptx files
-	add_custom_command(TARGET wurstframework POST_BUILD
+	add_custom_command(
+		TARGET wurstframework POST_BUILD
 		# copy enoki dlls
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/dependencies/enoki/enoki-cuda.dll ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/dependencies/enoki/enoki-autodiff.dll ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
 		
 		# copy all .ptx
-		COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/CMakeFiles/wurstframework_ptx.dir/ ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ptxfiles)
+		COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/CMakeFiles/wurstframework_ptx.dir/src/ ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ptxfiles)
 
 # OpenGL and X11 for the viewer
 	find_package(OpenGL)

@@ -131,7 +131,7 @@ struct OptixBackend
 		cudaMalloc(reinterpret_cast<void **>(&d_temp_buffer_gas), gas_buffer_size.tempSizeInBytes);
 		cudaMalloc(reinterpret_cast<void **>(&d_gas_output_buffer), gas_buffer_size.outputSizeInBytes);
 
-		OptixTraversableHandle gas_handle = 0;
+		m_optix_gas_handle = 0;
 		optixAccelBuild(m_optix_context,
 						0,
 						&accel_options,
@@ -141,7 +141,7 @@ struct OptixBackend
 						gas_buffer_size.tempSizeInBytes,
 						d_gas_output_buffer,
 						gas_buffer_size.outputSizeInBytes,
-						&gas_handle,
+						&m_optix_gas_handle,
 						nullptr,
 						0);
 		cudaFree(reinterpret_cast<void *>(d_temp_buffer_gas));
@@ -162,7 +162,7 @@ struct OptixBackend
 		pipeline_compile_options.pipelineLaunchParamsVariableName = "params";
 
 		std::string ptx;
-		readSourceFile(ptx, "ptxfiles/src/wavefront_isect.ptx");
+		readSourceFile(ptx, "ptxfiles/wavefront_isect.ptx");
 
 		char log[2048];
 		size_t sizeof_log = sizeof(log);
@@ -234,7 +234,7 @@ struct OptixBackend
 
 
 		// Link pipeline.
-		OptixPipeline pipeline = nullptr;
+		m_optix_pipeline = nullptr;
 		{
 			OptixProgramGroup program_groups[] = { raygen_prog_group, miss_prog_group, hitgroup_prog_group };
 
@@ -251,12 +251,12 @@ struct OptixBackend
 				sizeof(program_groups) / sizeof(program_groups[0]),
 				log,
 				&sizeof_log,
-				&pipeline
+				&m_optix_pipeline
 			);
 		}
 
 		// Set up shader binding table.
-		OptixShaderBindingTable sbt = {};
+		m_optix_sbt = {};
 		{
 			CUdeviceptr raygen_record;
 			const size_t raygen_record_size = sizeof(RayGenSbtRecord);
@@ -295,53 +295,72 @@ struct OptixBackend
 				cudaMemcpyHostToDevice
 			);
 
-			sbt.raygenRecord = raygen_record;
-			sbt.missRecordBase = miss_record;
-			sbt.missRecordStrideInBytes = sizeof(MissSbtRecord);
-			sbt.missRecordCount = 1;
-			sbt.hitgroupRecordBase = hitgroup_record;
-			sbt.hitgroupRecordStrideInBytes = sizeof(HitGroupSbtRecord);
-			sbt.hitgroupRecordCount = 1;
+			m_optix_sbt.raygenRecord = raygen_record;
+			m_optix_sbt.missRecordBase = miss_record;
+			m_optix_sbt.missRecordStrideInBytes = sizeof(MissSbtRecord);
+			m_optix_sbt.missRecordCount = 1;
+			m_optix_sbt.hitgroupRecordBase = hitgroup_record;
+			m_optix_sbt.hitgroupRecordStrideInBytes = sizeof(HitGroupSbtRecord);
+			m_optix_sbt.hitgroupRecordCount = 1;
 		}
 
+	}
+
+	TriangleHitInfoC intersect(Ray3C & rays)
+	{
+		cuda_eval();
+
 		OptixRayResult * result;
-		cudaMalloc(&result, sizeof(OptixRayResult) * 1024 * 768);
+		cudaMalloc(&result, sizeof(OptixRayResult) * 1920 * 1080);
 
 		Params param;
-		param.handle = gas_handle;
+		param.handle = m_optix_gas_handle;
 		param.closest = true;
 		param.results = result;
+
+		IntC tri_id = zero<IntC>(rays.m_dir.z().size());
+
+		param.m_ray_origin_x = rays.m_origin.x().data();
+		param.m_ray_origin_y = rays.m_origin.y().data();
+		param.m_ray_origin_z = rays.m_origin.z().data();
+		param.m_ray_dir_x = rays.m_dir.x().data();
+		param.m_ray_dir_y = rays.m_dir.y().data();
+		param.m_ray_dir_z = rays.m_dir.z().data();
+		param.m_ray_tmin = rays.m_tmin.data();
+		param.m_ray_tmax = rays.m_tmax.data();
+		param.m_tri_id = tri_id.data();
 
 		CUdeviceptr d_param;
 		cudaMalloc(reinterpret_cast<void **>(&d_param), sizeof(Params));
 		cudaMemcpy(reinterpret_cast<void *>(d_param), &param, sizeof(Params), cudaMemcpyHostToDevice);
 
 		// Launch now, passing in our pipeline, launch params, and SBT
-		optixLaunch(pipeline,
+		optixLaunch(m_optix_pipeline,
 					0,   // Default CUDA stream
 					d_param,
 					sizeof(Params),
-					&sbt,
-					1024,
-					768,
+					&m_optix_sbt,
+					1920,
+					1080,
 					1); // depth
 
 		// check if hit
-		OptixRayResult * testtt = new OptixRayResult[1024 * 768];
-		cudaMemcpy(testtt, result, sizeof(OptixRayResult) * 1024 * 768, cudaMemcpyDeviceToHost);
+		OptixRayResult * testtt = new OptixRayResult[1920 * 1080];
+		cudaMemcpy(testtt, result, sizeof(OptixRayResult) * 1920 * 1080, cudaMemcpyDeviceToHost);
 
-		std::cout << "t:" << testtt->id << std::endl;
-		std::cout << "id:" << testtt->t << std::endl;
-	}
+		std::cout << "t:" << testtt->t << std::endl;
+		std::cout << "id:" << testtt->id << std::endl;
+		std::cout << "trid_id: " << tri_id[0] << std::endl;
 
-	TriangleHitInfoC intersect(const Ray3C & rays)
-	{
-		OptixAccelBuildOptions optix_accel_options = {};
-		TriangleHitInfoC result;
-		return result;
+		TriangleHitInfoC tc;
+		tc.m_tri_id = tri_id;
+		return tc;
 	}
 
 	Int3C					m_triangles;
 	Real3C					m_vertices;
 	OptixDeviceContext		m_optix_context;
+	OptixPipeline			m_optix_pipeline;
+	OptixTraversableHandle	m_optix_gas_handle;
+	OptixShaderBindingTable m_optix_sbt;
 };

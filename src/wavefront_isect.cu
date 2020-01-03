@@ -83,6 +83,18 @@ extern "C" __global__ void __raygen__rg() {
     uint32_t id, t, u, v;
     OptixRay ray = rays[linear_idx];
 
+    ray.origin.x = params.m_ray_origin_x[linear_idx];
+    ray.origin.y = params.m_ray_origin_y[linear_idx];
+    ray.origin.z = params.m_ray_origin_z[linear_idx];
+
+    ray.direction.x = params.m_ray_dir_x[linear_idx];
+    ray.direction.y = params.m_ray_dir_y[linear_idx];
+    ray.direction.z = params.m_ray_dir_z[linear_idx];
+
+    /*
+    ray.tmin = params.m_ray_tmin[0];
+    ray.tmax = params.m_ray_tmax[0];
+
     ray.origin.x = 0;
     ray.origin.y = 5;
     ray.origin.z = 0;
@@ -90,8 +102,9 @@ extern "C" __global__ void __raygen__rg() {
     ray.direction.x = 0;
     ray.direction.y = -1;
     ray.direction.z = 0;
+    */
 
-    ray.tmin = 0.1;
+    ray.tmin = 0.01;
     ray.tmax = 1e30;
 
     optixTrace(params.handle, ray.origin, ray.direction, ray.tmin, ray.tmax, 0.0f, OptixVisibilityMask(1),
@@ -103,5 +116,9 @@ extern "C" __global__ void __raygen__rg() {
     result.t = int_as_float(t);
     result.u = (1.0f - int_as_float(v) - int_as_float(u));
     result.v = int_as_float(u);
+
+    params.m_ray_tmax[linear_idx] = t;
+    params.m_tri_id[linear_idx] = id;
+
     results[linear_idx] = result;
 }
