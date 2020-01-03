@@ -31,34 +31,7 @@
 #include <vector_types.h>
 #include <stdint.h>
 
-struct Ray;
-struct RayResult;
-
-struct Params
-{
-    bool closest;
-    Ray * rays;
-    RayResult * results;
-    OptixTraversableHandle handle;
-};
-
-struct RayGenData {};
-struct HitGroupData {};
-struct MissData {};
-
-struct Ray {
-    float3 origin;
-    float tmin;
-    float3 direction;
-    float tmax;
-};
-
-struct RayResult {
-    int id;
-    float t;
-    float u;
-    float v;
-};
+#include "optixdata.h"
 
 extern "C" {
     __constant__ Params params;
@@ -95,7 +68,7 @@ extern "C" __global__ void __miss__ms() {
 
 //------------------------------------------------------------------------------
 //
-// Ray generation
+// OptixRay generation
 //
 //------------------------------------------------------------------------------
 
@@ -104,16 +77,28 @@ extern "C" __global__ void __raygen__rg() {
     const uint3 dim = optixGetLaunchDimensions();
     const uint32_t linear_idx = idx.z * dim.y * dim.x + idx.y * dim.x + idx.x;
 
-    Ray * rays = (Ray *)params.rays;
-    RayResult * results = (RayResult *)params.results;
+    OptixRay * rays = (OptixRay *)params.rays;
+    OptixRayResult * results = (OptixRayResult *)params.results;
 
     uint32_t id, t, u, v;
-    Ray ray = rays[linear_idx];
+    OptixRay ray = rays[linear_idx];
+
+    ray.origin.x = 0;
+    ray.origin.y = 5;
+    ray.origin.z = 0;
+
+    ray.direction.x = 0;
+    ray.direction.y = -1;
+    ray.direction.z = 0;
+
+    ray.tmin = 0.1;
+    ray.tmax = 1e30;
+
     optixTrace(params.handle, ray.origin, ray.direction, ray.tmin, ray.tmax, 0.0f, OptixVisibilityMask(1),
                params.closest ? OPTIX_RAY_FLAG_NONE : OPTIX_RAY_FLAG_DISABLE_ANYHIT |
                OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT | OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT, 0, 0, 0, id, t, u, v);
 
-    RayResult result;
+    OptixRayResult result;
     result.id = id;
     result.t = int_as_float(t);
     result.u = (1.0f - int_as_float(v) - int_as_float(u));

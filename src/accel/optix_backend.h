@@ -12,6 +12,21 @@
 #include <fstream>
 #include <sstream>
 
+#include "optixdata.h"
+
+// SBT record with an appropriately aligned and sized data block
+template<typename T>
+struct SbtRecord
+{
+	__align__(OPTIX_SBT_RECORD_ALIGNMENT)
+	char header[OPTIX_SBT_RECORD_HEADER_SIZE];
+	T data;
+};
+
+typedef SbtRecord<RayGenData> RayGenSbtRecord;
+typedef SbtRecord<MissData> MissSbtRecord;
+typedef SbtRecord<HitGroupData> HitGroupSbtRecord;
+
 template <typename Int_, typename Real_>
 struct TriangleHitInfo
 {
@@ -132,26 +147,195 @@ struct OptixBackend
 		cudaFree(reinterpret_cast<void *>(d_temp_buffer_gas));
 
 		// Pipeline options must be consistent for all modules used in a
-// single pipeline
+		// single pipeline
 		OptixPipelineCompileOptions pipeline_compile_options = {};
 		pipeline_compile_options.usesMotionBlur = false;
 
 		// This option is important to ensure we compile code which is optimal
 		// for our scene hierarchy. We use a single GAS – no instancing or
 		// multi-level hierarchies
-		pipeline_compile_options.traversableGraphFlags =
-			OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
-
+		pipeline_compile_options.traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
 		// Our device code uses 3 payload registers (r,g,b output value)
-		pipeline_compile_options.numPayloadValues = 3;
-
+		pipeline_compile_options.numPayloadValues = 4;
+		pipeline_compile_options.numAttributeValues = 0;
 		// This is the name of the param struct variable in our device code
 		pipeline_compile_options.pipelineLaunchParamsVariableName = "params";
+
+		std::string ptx;
+		readSourceFile(ptx, "ptxfiles/src/wavefront_isect.ptx");
+
+		char log[2048];
+		size_t sizeof_log = sizeof(log);
+
+		OptixModule module = nullptr; // The output module
+		OptixModuleCompileOptions module_compile_options = {};
+		module_compile_options.maxRegisterCount = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT;
+		module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT;
+		module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
+		optixModuleCreateFromPTX(
+			m_optix_context,
+			&module_compile_options,
+			&pipeline_compile_options,
+			ptx.c_str(),
+			ptx.size(),
+			log,
+			&sizeof_log,
+			&module);
+
+
+		// Create program groups.
+		OptixProgramGroup raygen_prog_group = nullptr;
+		OptixProgramGroup miss_prog_group = nullptr;
+		OptixProgramGroup hitgroup_prog_group = nullptr;
+
+		OptixProgramGroupOptions program_group_options = {}; // Initialize to zeros
+
+		OptixProgramGroupDesc raygen_prog_group_desc = {}; //
+		raygen_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
+		raygen_prog_group_desc.raygen.module = module;
+		raygen_prog_group_desc.raygen.entryFunctionName = "__raygen__rg";
+		optixProgramGroupCreate(
+			m_optix_context,
+			&raygen_prog_group_desc,
+			1,   // num program groups
+			&program_group_options,
+			log,
+			&sizeof_log,
+			&raygen_prog_group
+		);
+
+		OptixProgramGroupDesc miss_prog_group_desc = {};
+		miss_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
+		miss_prog_group_desc.miss.module = module;
+		miss_prog_group_desc.miss.entryFunctionName = "__miss__ms";
+		optixProgramGroupCreate(
+			m_optix_context,
+			&miss_prog_group_desc,
+			1,   // num program groups
+			&program_group_options,
+			log,
+			&sizeof_log,
+			&miss_prog_group
+		);
+
+		OptixProgramGroupDesc hitgroup_prog_group_desc = {};
+		hitgroup_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
+		hitgroup_prog_group_desc.hitgroup.moduleCH = module;
+		hitgroup_prog_group_desc.hitgroup.entryFunctionNameCH = "__closesthit__ch";
+		optixProgramGroupCreate(
+			m_optix_context,
+			&hitgroup_prog_group_desc,
+			1,   // num program groups
+			&program_group_options,
+			log,
+			&sizeof_log,
+			&hitgroup_prog_group
+		);
+
+
+		// Link pipeline.
+		OptixPipeline pipeline = nullptr;
+		{
+			OptixProgramGroup program_groups[] = { raygen_prog_group, miss_prog_group, hitgroup_prog_group };
+
+			OptixPipelineLinkOptions pipeline_link_options = {};
+			pipeline_link_options.maxTraceDepth = 5;
+			pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
+			pipeline_link_options.overrideUsesMotionBlur = false;
+			char log[2048]; size_t sizeof_log = sizeof(log);
+			optixPipelineCreate(
+				m_optix_context,
+				&pipeline_compile_options,
+				&pipeline_link_options,
+				program_groups,
+				sizeof(program_groups) / sizeof(program_groups[0]),
+				log,
+				&sizeof_log,
+				&pipeline
+			);
+		}
+
+		// Set up shader binding table.
+		OptixShaderBindingTable sbt = {};
+		{
+			CUdeviceptr raygen_record;
+			const size_t raygen_record_size = sizeof(RayGenSbtRecord);
+			cudaMalloc(reinterpret_cast<void **>(&raygen_record), raygen_record_size);
+			RayGenSbtRecord rg_sbt;
+			rg_sbt.data = {};
+			optixSbtRecordPackHeader(raygen_prog_group, &rg_sbt);
+			cudaMemcpy(
+				reinterpret_cast<void *>(raygen_record),
+				&rg_sbt,
+				raygen_record_size,
+				cudaMemcpyHostToDevice
+			);
+
+			CUdeviceptr miss_record;
+			size_t      miss_record_size = sizeof(MissSbtRecord);
+			cudaMalloc(reinterpret_cast<void **>(&miss_record), miss_record_size);
+			MissSbtRecord ms_sbt;
+			optixSbtRecordPackHeader(miss_prog_group, &ms_sbt);
+			cudaMemcpy(
+				reinterpret_cast<void *>(miss_record),
+				&ms_sbt,
+				miss_record_size,
+				cudaMemcpyHostToDevice
+			);
+
+			CUdeviceptr hitgroup_record;
+			size_t      hitgroup_record_size = sizeof(HitGroupSbtRecord);
+			cudaMalloc(reinterpret_cast<void **>(&hitgroup_record), hitgroup_record_size);
+			HitGroupSbtRecord hg_sbt;
+			optixSbtRecordPackHeader(hitgroup_prog_group, &hg_sbt);
+			cudaMemcpy(
+				reinterpret_cast<void *>(hitgroup_record),
+				&hg_sbt,
+				hitgroup_record_size,
+				cudaMemcpyHostToDevice
+			);
+
+			sbt.raygenRecord = raygen_record;
+			sbt.missRecordBase = miss_record;
+			sbt.missRecordStrideInBytes = sizeof(MissSbtRecord);
+			sbt.missRecordCount = 1;
+			sbt.hitgroupRecordBase = hitgroup_record;
+			sbt.hitgroupRecordStrideInBytes = sizeof(HitGroupSbtRecord);
+			sbt.hitgroupRecordCount = 1;
+		}
+
+		OptixRayResult * result;
+		cudaMalloc(&result, sizeof(OptixRayResult) * 1024 * 768);
+
+		Params param;
+		param.handle = gas_handle;
+		param.closest = true;
+		param.results = result;
+
+		CUdeviceptr d_param;
+		cudaMalloc(reinterpret_cast<void **>(&d_param), sizeof(Params));
+		cudaMemcpy(reinterpret_cast<void *>(d_param), &param, sizeof(Params), cudaMemcpyHostToDevice);
+
+		// Launch now, passing in our pipeline, launch params, and SBT
+		optixLaunch(pipeline,
+					0,   // Default CUDA stream
+					d_param,
+					sizeof(Params),
+					&sbt,
+					1024,
+					768,
+					1); // depth
+
+		// check if hit
+		OptixRayResult * testtt = new OptixRayResult[1024 * 768];
+		cudaMemcpy(testtt, result, sizeof(OptixRayResult) * 1024 * 768, cudaMemcpyDeviceToHost);
+
+		std::cout << "t:" << testtt->id << std::endl;
+		std::cout << "id:" << testtt->t << std::endl;
 	}
 
 	TriangleHitInfoC intersect(const Ray3C & rays)
 	{
-
 		OptixAccelBuildOptions optix_accel_options = {};
 		TriangleHitInfoC result;
 		return result;
