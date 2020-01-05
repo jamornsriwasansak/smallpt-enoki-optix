@@ -16,19 +16,20 @@ struct OptixRayResult {
 
 struct Params
 {
-    bool closest;
-    OptixRay * rays;
-    OptixRayResult * results;
-    OptixTraversableHandle handle;
-    int * m_tri_id;
-    float * m_ray_origin_x;
-    float * m_ray_origin_y;
-    float * m_ray_origin_z;
-    float * m_ray_dir_x;
-    float * m_ray_dir_y;
-    float * m_ray_dir_z;
-    float * m_ray_tmin;
-    float * m_ray_tmax;
+    const float * m_ray_origin_x;
+    const float * m_ray_origin_y;
+    const float * m_ray_origin_z;
+    const float * m_ray_dir_x;
+    const float * m_ray_dir_y;
+    const float * m_ray_dir_z;
+    const float * m_ray_tmin;
+    const float * m_ray_tmax;
+    int * m_result_tri_id;
+    float * m_result_barycentric_u;
+    float * m_result_barycentric_v;
+    float * m_result_t;
+    OptixTraversableHandle m_optix_handle;
+    bool m_do_closest;
 };
 
 struct RayGenData {};

@@ -107,15 +107,15 @@ int main()
 	}
 	CUDAArray<Bsdf *> materials = CUDAArray<Bsdf *>::copy(raw_ptrs(materials_host).data(), materials_host.size());
 
-	OptixBackend prime_backend;
-	prime_backend.set_triangles_soup(triangles_host, num_triangles, vertices_host, num_vertices);
+	OptixBackend optix_backend;
+	optix_backend.set_triangles_soup(triangles_host, num_triangles, vertices_host, num_vertices);
 	int width = 1920;
 	int height = 1080;
 
 	SpectrumC film = zero<SpectrumC>(width * height);
 
 	PCG32<RealC> rng(PCG32_DEFAULT_STATE, arange<RealC>(width * height));
-	int num_samples = 1;
+	int num_samples = 10000;
 	for (int i = 0; i < num_samples; i++)
 	{
 		std::cout << i << std::endl;
@@ -127,11 +127,9 @@ int main()
 		ThinlensCamera thinlens(Real3(0.0_f, 0.03_f, 0.2_f), Real3(0.0_f, 0.03_f, 0.0_f), Real3(0.0_f, 1.0_f, 0.0_f), 0.00_f, 1.0_f, 70.0_f / 180.0_f * M_PI_f);
 		const Real3C origin = thinlens.sample_pos(Real2C(rng.next_float32(), rng.next_float32()));
 		const Real3C direction = thinlens.sample_dir(pixel, origin, Int2(width, height), Real2C(rng.next_float32(), rng.next_float32()));
-		Ray3C rays(origin, direction, zero<RealC>(origin.x().size()) + 0.01_f, zero<RealC>(origin.x().size()) + 1e20_f);
-		const TriangleHitInfoC hit_info = prime_backend.intersect(rays);
+		Ray3C rays(origin, direction, zero<RealC>(origin.x().size()) + 0.0001_f, zero<RealC>(origin.x().size()) + 1e20_f);
+		const TriangleHitInfoC hit_info = optix_backend.intersect(rays);
 
-		film += select(neq(hit_info.m_tri_id, -1), zero<RealC>(num_pixels) + 1.0_f, zero<RealC>(num_pixels) + 0.0_f);
-		/*
 		const Frame3C coord_frame(hit_info.m_geometry_normal);
 		const IntC mat_index = gather<IntC>(material_id, hit_info.m_tri_id, hit_info.m_tri_id >= 0);
 		const CUDAArray<Bsdf *> bsdf = gather<CUDAArray<Bsdf *>>(materials, mat_index);
@@ -142,10 +140,9 @@ int main()
 		const Real3C outgoing = coord_frame.to_world(outgoing_local);
 
 		// sample out going direction
-		Ray3C second_rays(hit_info.m_position, outgoing, 0.0001_f, 1e20_f);
-		const TriangleHitInfoC second_hit_info = prime_backend.intersect(second_rays);
+		Ray3C second_rays(hit_info.m_position, outgoing, zero<RealC>(origin.x().size()) + 0.0001_f, zero<RealC>(origin.x().size()) + 1e20_f);
+		const TriangleHitInfoC second_hit_info = optix_backend.intersect(second_rays);
 		film += bsdf_contrib * select(neq(hit_info.m_tri_id, -1) && eq(second_hit_info.m_tri_id, -1), zero<RealC>(num_pixels) + 1.0_f, zero<RealC>(num_pixels) + 0.0_f);
-		*/
 	}
 
 	film /= Real(num_samples);

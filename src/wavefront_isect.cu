@@ -77,11 +77,7 @@ extern "C" __global__ void __raygen__rg() {
     const uint3 dim = optixGetLaunchDimensions();
     const uint32_t linear_idx = idx.z * dim.y * dim.x + idx.y * dim.x + idx.x;
 
-    OptixRay * rays = (OptixRay *)params.rays;
-    OptixRayResult * results = (OptixRayResult *)params.results;
-
-    uint32_t id, t, u, v;
-    OptixRay ray = rays[linear_idx];
+    OptixRay ray;
 
     ray.origin.x = params.m_ray_origin_x[linear_idx];
     ray.origin.y = params.m_ray_origin_y[linear_idx];
@@ -91,34 +87,16 @@ extern "C" __global__ void __raygen__rg() {
     ray.direction.y = params.m_ray_dir_y[linear_idx];
     ray.direction.z = params.m_ray_dir_z[linear_idx];
 
-    /*
-    ray.tmin = params.m_ray_tmin[0];
-    ray.tmax = params.m_ray_tmax[0];
+    ray.tmin = params.m_ray_tmin[linear_idx];
+    ray.tmax = params.m_ray_tmax[linear_idx];
 
-    ray.origin.x = 0;
-    ray.origin.y = 5;
-    ray.origin.z = 0;
-
-    ray.direction.x = 0;
-    ray.direction.y = -1;
-    ray.direction.z = 0;
-    */
-
-    ray.tmin = 0.01;
-    ray.tmax = 1e30;
-
-    optixTrace(params.handle, ray.origin, ray.direction, ray.tmin, ray.tmax, 0.0f, OptixVisibilityMask(1),
-               params.closest ? OPTIX_RAY_FLAG_NONE : OPTIX_RAY_FLAG_DISABLE_ANYHIT |
+    uint32_t id, t, u, v;
+    optixTrace(params.m_optix_handle, ray.origin, ray.direction, ray.tmin, ray.tmax, 0.0f, OptixVisibilityMask(1),
+               params.m_do_closest ? OPTIX_RAY_FLAG_NONE : OPTIX_RAY_FLAG_DISABLE_ANYHIT |
                OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT | OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT, 0, 0, 0, id, t, u, v);
 
-    OptixRayResult result;
-    result.id = id;
-    result.t = int_as_float(t);
-    result.u = (1.0f - int_as_float(v) - int_as_float(u));
-    result.v = int_as_float(u);
-
-    params.m_ray_tmax[linear_idx] = t;
-    params.m_tri_id[linear_idx] = id;
-
-    results[linear_idx] = result;
+    params.m_result_t[linear_idx] = int_as_float(t);
+    params.m_result_tri_id[linear_idx] = id;
+    params.m_result_barycentric_u[linear_idx] = (1.0f - int_as_float(v) - int_as_float(u));
+    params.m_result_barycentric_v[linear_idx] = int_as_float(u);
 }

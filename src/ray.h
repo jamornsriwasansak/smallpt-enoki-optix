@@ -17,10 +17,7 @@ struct Ray
 	}
 
 	Ray(const RealNT & origin, const RealNT & dir):
-		m_origin(origin),
-		m_dir(dir),
-		m_tmin(0.0_f),
-		m_tmax(1e34_f)
+		Ray(origin, dir, zero<RealT>(origin.x().size()) + 0.01_f, zero<RealT>(origin.x().size()) + 1e20_f)
 	{
 	}
 

@@ -12,6 +12,5 @@ inline Real3T compute_geometry_normal(const Real3T & p1, const Real3T & p2, cons
 	const Real3T e1 = p2 - p1;
 	const Real3T e2 = p3 - p1;
 	const Real3T un = cross(e1, e2);
-	auto len = enoki::norm(un);
-	return un / len;
+	return normalize(un);
 }

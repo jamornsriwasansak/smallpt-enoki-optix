@@ -35,31 +35,31 @@ struct TriangleHitInfo
 	using Real2T = Array<RealT, 2, false>;
 	using Real3T = Array<RealT, 3, false>;
 
-	TriangleHitInfo()
-	{
-	}
-
-	TriangleHitInfo(const RealT & t, const IntT & tri_id, const Real2T & barycentric,
-					const Real3T & position, const Real3T & geometry_normal) :
-		m_t(t),
+	TriangleHitInfo(const IntT & tri_id,
+					const RealT & t,
+					const Real2T & barycentric,
+					const Real3T & position,
+					const Real3T & geometry_normal):
 		m_tri_id(tri_id),
+		m_t(t),
 		m_barycentric(barycentric),
 		m_position(position),
 		m_geometry_normal(geometry_normal)
 	{
 	}
 
-	RealT	m_t;
 	IntT	m_tri_id;
 	Real2T	m_barycentric;
 	Real3T	m_position;
 	Real3T	m_geometry_normal;
+	RealT	m_t;
 	//Real3T	m_shading_normal;
 };
+
 using TriangleHitInfoC = TriangleHitInfo<IntC, RealC>;
 using TriangleHitInfoS = TriangleHitInfo<Int, Real>;
 
-bool readSourceFile(std::string & str, const std::string & filename)
+bool read_source_file(std::string & str, const std::string & filename)
 {
 	// Try to open file
 	std::ifstream file(filename.c_str());
@@ -88,7 +88,9 @@ struct OptixBackend
 {
 	OptixBackend():
 		m_triangles(empty<Int3C>()),
-		m_vertices(empty<Real3C>())
+		m_triangles_aos(empty<IntC>()),
+		m_vertices(empty<Real3C>()),
+		m_vertices_aos(empty<RealC>())
 	{
 		optixInit();
 		OptixDeviceContextOptions optix_options = {};
@@ -98,10 +100,12 @@ struct OptixBackend
 
 	void set_triangles_soup(const int3 * triangles_host, const size_t num_triangles, const float3 * vertices_host, const size_t num_vertices)
 	{
-		m_triangles = IntC::copy(triangles_host, 3 * num_triangles);
-		m_vertices = RealC::copy(vertices_host, 3 * num_vertices);
-		CUdeviceptr test2 = reinterpret_cast<CUdeviceptr>(m_triangles.data()->data());
-		CUdeviceptr test = reinterpret_cast<CUdeviceptr>(m_vertices.data()->data());
+		m_triangles_aos = IntC::copy(triangles_host, 3 * num_triangles);
+		m_vertices_aos = RealC::copy(vertices_host, 3 * num_vertices);
+		cuda_eval();
+
+		CUdeviceptr test2 = reinterpret_cast<CUdeviceptr>(m_triangles_aos.data());
+		CUdeviceptr test = reinterpret_cast<CUdeviceptr>(m_vertices_aos.data());
 
 		// Specify options for the build. We use default options for simplicity.
 		OptixAccelBuildOptions accel_options = {};
@@ -151,18 +155,15 @@ struct OptixBackend
 		OptixPipelineCompileOptions pipeline_compile_options = {};
 		pipeline_compile_options.usesMotionBlur = false;
 
-		// This option is important to ensure we compile code which is optimal
-		// for our scene hierarchy. We use a single GAS – no instancing or
-		// multi-level hierarchies
+		// for our scene hierarchy. We use a single GAS – no instancing or multi-level hierarchies
+		// Our device code uses 4 payload registers (triangle_id, t, uv.x, uv.y)
 		pipeline_compile_options.traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
-		// Our device code uses 3 payload registers (r,g,b output value)
 		pipeline_compile_options.numPayloadValues = 4;
 		pipeline_compile_options.numAttributeValues = 0;
-		// This is the name of the param struct variable in our device code
 		pipeline_compile_options.pipelineLaunchParamsVariableName = "params";
 
 		std::string ptx;
-		readSourceFile(ptx, "ptxfiles/wavefront_isect.ptx");
+		read_source_file(ptx, "ptxfiles/wavefront_isect.ptx");
 
 		char log[2048];
 		size_t sizeof_log = sizeof(log);
@@ -172,154 +173,99 @@ struct OptixBackend
 		module_compile_options.maxRegisterCount = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT;
 		module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT;
 		module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
-		optixModuleCreateFromPTX(
-			m_optix_context,
-			&module_compile_options,
-			&pipeline_compile_options,
-			ptx.c_str(),
-			ptx.size(),
-			log,
-			&sizeof_log,
-			&module);
-
+		optixModuleCreateFromPTX(m_optix_context, &module_compile_options, &pipeline_compile_options, ptx.c_str(), ptx.size(), log, &sizeof_log, &module);
 
 		// Create program groups.
 		OptixProgramGroup raygen_prog_group = nullptr;
 		OptixProgramGroup miss_prog_group = nullptr;
 		OptixProgramGroup hitgroup_prog_group = nullptr;
-
 		OptixProgramGroupOptions program_group_options = {}; // Initialize to zeros
-
 		OptixProgramGroupDesc raygen_prog_group_desc = {}; //
 		raygen_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
 		raygen_prog_group_desc.raygen.module = module;
 		raygen_prog_group_desc.raygen.entryFunctionName = "__raygen__rg";
-		optixProgramGroupCreate(
-			m_optix_context,
-			&raygen_prog_group_desc,
-			1,   // num program groups
-			&program_group_options,
-			log,
-			&sizeof_log,
-			&raygen_prog_group
-		);
+		optixProgramGroupCreate(m_optix_context, &raygen_prog_group_desc, 1, &program_group_options, log, &sizeof_log, &raygen_prog_group);
 
 		OptixProgramGroupDesc miss_prog_group_desc = {};
 		miss_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
 		miss_prog_group_desc.miss.module = module;
 		miss_prog_group_desc.miss.entryFunctionName = "__miss__ms";
-		optixProgramGroupCreate(
-			m_optix_context,
-			&miss_prog_group_desc,
-			1,   // num program groups
-			&program_group_options,
-			log,
-			&sizeof_log,
-			&miss_prog_group
-		);
+		optixProgramGroupCreate(m_optix_context, &miss_prog_group_desc, 1, &program_group_options, log, &sizeof_log, &miss_prog_group);
 
 		OptixProgramGroupDesc hitgroup_prog_group_desc = {};
 		hitgroup_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
 		hitgroup_prog_group_desc.hitgroup.moduleCH = module;
 		hitgroup_prog_group_desc.hitgroup.entryFunctionNameCH = "__closesthit__ch";
-		optixProgramGroupCreate(
-			m_optix_context,
-			&hitgroup_prog_group_desc,
-			1,   // num program groups
-			&program_group_options,
-			log,
-			&sizeof_log,
-			&hitgroup_prog_group
-		);
-
+		optixProgramGroupCreate(m_optix_context, &hitgroup_prog_group_desc, 1, &program_group_options, log, &sizeof_log, &hitgroup_prog_group);
 
 		// Link pipeline.
 		m_optix_pipeline = nullptr;
-		{
-			OptixProgramGroup program_groups[] = { raygen_prog_group, miss_prog_group, hitgroup_prog_group };
-
-			OptixPipelineLinkOptions pipeline_link_options = {};
-			pipeline_link_options.maxTraceDepth = 5;
-			pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
-			pipeline_link_options.overrideUsesMotionBlur = false;
-			char log[2048]; size_t sizeof_log = sizeof(log);
-			optixPipelineCreate(
-				m_optix_context,
-				&pipeline_compile_options,
-				&pipeline_link_options,
-				program_groups,
-				sizeof(program_groups) / sizeof(program_groups[0]),
-				log,
-				&sizeof_log,
-				&m_optix_pipeline
-			);
-		}
+		OptixProgramGroup program_groups[] = { raygen_prog_group, miss_prog_group, hitgroup_prog_group };
+		OptixPipelineLinkOptions pipeline_link_options = {};
+		pipeline_link_options.maxTraceDepth = 5;
+		pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
+		pipeline_link_options.overrideUsesMotionBlur = false;
+		optixPipelineCreate(m_optix_context, &pipeline_compile_options, &pipeline_link_options, program_groups,
+							sizeof(program_groups) / sizeof(program_groups[0]), log, &sizeof_log, &m_optix_pipeline);
 
 		// Set up shader binding table.
+		CUdeviceptr raygen_record;
+		const size_t raygen_record_size = sizeof(RayGenSbtRecord);
+		cudaMalloc(reinterpret_cast<void **>(&raygen_record), raygen_record_size);
+		RayGenSbtRecord rg_sbt;
+		rg_sbt.data = {};
+		optixSbtRecordPackHeader(raygen_prog_group, &rg_sbt);
+		cudaMemcpy(reinterpret_cast<void *>(raygen_record), &rg_sbt, raygen_record_size, cudaMemcpyHostToDevice);
+
+		CUdeviceptr miss_record;
+		size_t      miss_record_size = sizeof(MissSbtRecord);
+		cudaMalloc(reinterpret_cast<void **>(&miss_record), miss_record_size);
+		MissSbtRecord ms_sbt;
+		optixSbtRecordPackHeader(miss_prog_group, &ms_sbt);
+		cudaMemcpy(reinterpret_cast<void *>(miss_record), &ms_sbt, miss_record_size, cudaMemcpyHostToDevice);
+
+		CUdeviceptr hitgroup_record;
+		size_t hitgroup_record_size = sizeof(HitGroupSbtRecord);
+		cudaMalloc(reinterpret_cast<void **>(&hitgroup_record), hitgroup_record_size);
+		HitGroupSbtRecord hg_sbt;
+		optixSbtRecordPackHeader(hitgroup_prog_group, &hg_sbt);
+		cudaMemcpy(reinterpret_cast<void *>(hitgroup_record), &hg_sbt, hitgroup_record_size, cudaMemcpyHostToDevice);
+
 		m_optix_sbt = {};
-		{
-			CUdeviceptr raygen_record;
-			const size_t raygen_record_size = sizeof(RayGenSbtRecord);
-			cudaMalloc(reinterpret_cast<void **>(&raygen_record), raygen_record_size);
-			RayGenSbtRecord rg_sbt;
-			rg_sbt.data = {};
-			optixSbtRecordPackHeader(raygen_prog_group, &rg_sbt);
-			cudaMemcpy(
-				reinterpret_cast<void *>(raygen_record),
-				&rg_sbt,
-				raygen_record_size,
-				cudaMemcpyHostToDevice
-			);
+		m_optix_sbt.raygenRecord = raygen_record;
+		m_optix_sbt.missRecordBase = miss_record;
+		m_optix_sbt.missRecordStrideInBytes = sizeof(MissSbtRecord);
+		m_optix_sbt.missRecordCount = 1;
+		m_optix_sbt.hitgroupRecordBase = hitgroup_record;
+		m_optix_sbt.hitgroupRecordStrideInBytes = sizeof(HitGroupSbtRecord);
+		m_optix_sbt.hitgroupRecordCount = 1;
 
-			CUdeviceptr miss_record;
-			size_t      miss_record_size = sizeof(MissSbtRecord);
-			cudaMalloc(reinterpret_cast<void **>(&miss_record), miss_record_size);
-			MissSbtRecord ms_sbt;
-			optixSbtRecordPackHeader(miss_prog_group, &ms_sbt);
-			cudaMemcpy(
-				reinterpret_cast<void *>(miss_record),
-				&ms_sbt,
-				miss_record_size,
-				cudaMemcpyHostToDevice
-			);
-
-			CUdeviceptr hitgroup_record;
-			size_t      hitgroup_record_size = sizeof(HitGroupSbtRecord);
-			cudaMalloc(reinterpret_cast<void **>(&hitgroup_record), hitgroup_record_size);
-			HitGroupSbtRecord hg_sbt;
-			optixSbtRecordPackHeader(hitgroup_prog_group, &hg_sbt);
-			cudaMemcpy(
-				reinterpret_cast<void *>(hitgroup_record),
-				&hg_sbt,
-				hitgroup_record_size,
-				cudaMemcpyHostToDevice
-			);
-
-			m_optix_sbt.raygenRecord = raygen_record;
-			m_optix_sbt.missRecordBase = miss_record;
-			m_optix_sbt.missRecordStrideInBytes = sizeof(MissSbtRecord);
-			m_optix_sbt.missRecordCount = 1;
-			m_optix_sbt.hitgroupRecordBase = hitgroup_record;
-			m_optix_sbt.hitgroupRecordStrideInBytes = sizeof(HitGroupSbtRecord);
-			m_optix_sbt.hitgroupRecordCount = 1;
-		}
-
+		// convert AoS to SoA for storing triangles internally
+		const IntC t_indices = arange<IntC>(num_triangles);
+		const IntC t0 = gather<IntC>(m_triangles_aos, t_indices * 3 + 0);
+		const IntC t1 = gather<IntC>(m_triangles_aos, t_indices * 3 + 1);
+		const IntC t2 = gather<IntC>(m_triangles_aos, t_indices * 3 + 2);
+		m_triangles = Int3C(t0, t1, t2);
+		const IntC p_indices = arange<IntC>(num_vertices);
+		const RealC p0 = gather<RealC>(m_vertices_aos, p_indices * 3 + 0);
+		const RealC p1 = gather<RealC>(m_vertices_aos, p_indices * 3 + 1);
+		const RealC p2 = gather<RealC>(m_vertices_aos, p_indices * 3 + 2);
+		m_vertices = Real3C(p0, p1, p2);
 	}
 
-	TriangleHitInfoC intersect(Ray3C & rays)
+	TriangleHitInfoC intersect(const Ray3C & rays)
 	{
+		// make sure that enoki makes the rays variable ready
 		cuda_eval();
 
-		OptixRayResult * result;
-		cudaMalloc(&result, sizeof(OptixRayResult) * 1920 * 1080);
+		IntC tri_id = empty<IntC>(rays.m_dir.z().size());
+		RealC barycentric_u = empty<RealC>(rays.m_dir.z().size());
+		RealC barycentric_v = empty<RealC>(rays.m_dir.z().size());
+		RealC t = empty<RealC>(rays.m_dir.z().size());
 
 		Params param;
-		param.handle = m_optix_gas_handle;
-		param.closest = true;
-		param.results = result;
-
-		IntC tri_id = zero<IntC>(rays.m_dir.z().size());
-
+		param.m_optix_handle = m_optix_gas_handle;
+		param.m_do_closest = true;
 		param.m_ray_origin_x = rays.m_origin.x().data();
 		param.m_ray_origin_y = rays.m_origin.y().data();
 		param.m_ray_origin_z = rays.m_origin.z().data();
@@ -328,7 +274,10 @@ struct OptixBackend
 		param.m_ray_dir_z = rays.m_dir.z().data();
 		param.m_ray_tmin = rays.m_tmin.data();
 		param.m_ray_tmax = rays.m_tmax.data();
-		param.m_tri_id = tri_id.data();
+		param.m_result_tri_id = tri_id.data();
+		param.m_result_t = t.data();
+		param.m_result_barycentric_u = barycentric_u.data();
+		param.m_result_barycentric_v = barycentric_v.data();
 
 		CUdeviceptr d_param;
 		cudaMalloc(reinterpret_cast<void **>(&d_param), sizeof(Params));
@@ -340,25 +289,25 @@ struct OptixBackend
 					d_param,
 					sizeof(Params),
 					&m_optix_sbt,
-					1920,
-					1080,
+					rays.m_origin.x().size(), // width (number of all rays)
+					1,  // height
 					1); // depth
 
-		// check if hit
-		OptixRayResult * testtt = new OptixRayResult[1920 * 1080];
-		cudaMemcpy(testtt, result, sizeof(OptixRayResult) * 1920 * 1080, cudaMemcpyDeviceToHost);
+		const Real2C barycentric = Real2C(barycentric_u, barycentric_v);
+		const Int3C vertex_indices = gather<Int3C>(m_triangles, tri_id);
+		const Real3C p = select(eq(tri_id, -1), zero<RealC>(), rays.m_origin + t * rays.m_dir);
+		const Real3C p0 = gather<Real3C>(m_vertices, vertex_indices.x());
+		const Real3C p1 = gather<Real3C>(m_vertices, vertex_indices.y());
+		const Real3C p2 = gather<Real3C>(m_vertices, vertex_indices.z());
+		const Real3C geometry_normal = compute_geometry_normal(p0, p1, p2);
 
-		std::cout << "t:" << testtt->t << std::endl;
-		std::cout << "id:" << testtt->id << std::endl;
-		std::cout << "trid_id: " << tri_id[0] << std::endl;
-
-		TriangleHitInfoC tc;
-		tc.m_tri_id = tri_id;
-		return tc;
+		return TriangleHitInfoC(tri_id, t, barycentric, p, geometry_normal);
 	}
 
 	Int3C					m_triangles;
+	IntC					m_triangles_aos;
 	Real3C					m_vertices;
+	RealC					m_vertices_aos;
 	OptixDeviceContext		m_optix_context;
 	OptixPipeline			m_optix_pipeline;
 	OptixTraversableHandle	m_optix_gas_handle;
