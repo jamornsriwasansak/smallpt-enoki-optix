@@ -115,7 +115,7 @@ int main()
 	SpectrumC film = zero<SpectrumC>(width * height);
 
 	PCG32<RealC> rng(PCG32_DEFAULT_STATE, arange<RealC>(width * height));
-	int num_samples = 10000;
+	int num_samples = 100;
 	for (int i = 0; i < num_samples; i++)
 	{
 		std::cout << i << std::endl;

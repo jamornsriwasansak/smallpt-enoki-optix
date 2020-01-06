@@ -14,6 +14,74 @@
 
 #include "optixdata.h"
 
+std::string createMessage(OptixResult res, const char * msg)
+{
+	std::ostringstream out;
+	out << optixGetErrorName(res) << ": " << msg;
+	return out.str();
+}
+
+#define OPTIX_CHECK( call )                                                    \
+    do                                                                         \
+    {                                                                          \
+        OptixResult res = call;                                                \
+        if( res != OPTIX_SUCCESS )                                             \
+        {                                                                      \
+            std::stringstream ss;                                              \
+            ss << "Optix call '" << #call << "' failed: " __FILE__ ":"         \
+               << __LINE__ << ")\n";                                           \
+            throw std::runtime_error( createMessage(res, ss.str().c_str()) );  \
+        }                                                                      \
+    } while( 0 )
+
+
+#define OPTIX_CHECK_LOG( call )                                                \
+    do                                                                         \
+    {                                                                          \
+        OptixResult res = call;                                                \
+        if( res != OPTIX_SUCCESS )                                             \
+        {                                                                      \
+            std::stringstream ss;                                              \
+            ss << "Optix call '" << #call << "' failed: " __FILE__ ":"         \
+               << __LINE__ << ")\nLog:\n" << log                               \
+               << ( sizeof_log > sizeof( log ) ? "<TRUNCATED>" : "" )          \
+               << "\n";                                                        \
+            throw std::runtime_error( createMessage(res, ss.str().c_str()) );  \
+        }                                                                      \
+    } while( 0 )
+
+#define CUDA_CHECK( call )                                                     \
+    do                                                                         \
+    {                                                                          \
+        cudaError_t error = call;                                              \
+        if( error != cudaSuccess )                                             \
+        {                                                                      \
+            std::stringstream ss;                                              \
+            ss << "CUDA call (" << #call << " ) failed with error: '"          \
+               << cudaGetErrorString( error )                                  \
+               << "' (" __FILE__ << ":" << __LINE__ << ")\n";                  \
+            throw std::runtime_error( ss.str().c_str() );                      \
+        }                                                                      \
+    } while( 0 )
+
+
+#define CUDA_SYNC_CHECK()                                                      \
+    do                                                                         \
+    {                                                                          \
+        cudaDeviceSynchronize();                                               \
+        cudaError_t error = cudaGetLastError();                                \
+        if( error != cudaSuccess )                                             \
+        {                                                                      \
+            std::stringstream ss;                                              \
+            ss << "CUDA error on synchronize with error '"                     \
+               << cudaGetErrorString( error )                                  \
+               << "' (" __FILE__ << ":" << __LINE__ << ")\n";                  \
+            throw std::runtime_error( ss.str().c_str() );                      \
+        }                                                                      \
+    } while( 0 )
+
+
+
 // SBT record with an appropriately aligned and sized data block
 template<typename T>
 struct SbtRecord
@@ -131,24 +199,15 @@ struct OptixBackend
 		OptixAccelBufferSizes gas_buffer_size;
 		optixAccelComputeMemoryUsage(m_optix_context, &accel_options, &triangle_input, 1, &gas_buffer_size);
 
-		CUdeviceptr d_temp_buffer_gas, d_gas_output_buffer;
-		cudaMalloc(reinterpret_cast<void **>(&d_temp_buffer_gas), gas_buffer_size.tempSizeInBytes);
-		cudaMalloc(reinterpret_cast<void **>(&d_gas_output_buffer), gas_buffer_size.outputSizeInBytes);
+		CUdeviceptr temp_buffer_gas, gas_output_buffer;
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&temp_buffer_gas), gas_buffer_size.tempSizeInBytes));
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&gas_output_buffer), gas_buffer_size.outputSizeInBytes));
 
 		m_optix_gas_handle = 0;
-		optixAccelBuild(m_optix_context,
-						0,
-						&accel_options,
-						&triangle_input,
-						1,
-						d_temp_buffer_gas,
-						gas_buffer_size.tempSizeInBytes,
-						d_gas_output_buffer,
-						gas_buffer_size.outputSizeInBytes,
-						&m_optix_gas_handle,
-						nullptr,
-						0);
-		cudaFree(reinterpret_cast<void *>(d_temp_buffer_gas));
+		OPTIX_CHECK(optixAccelBuild(m_optix_context, 0, &accel_options, &triangle_input, 1, temp_buffer_gas,
+						gas_buffer_size.tempSizeInBytes, gas_output_buffer, gas_buffer_size.outputSizeInBytes,
+						&m_optix_gas_handle, nullptr, 0));
+		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(temp_buffer_gas)));
 
 		// Pipeline options must be consistent for all modules used in a
 		// single pipeline
@@ -173,7 +232,7 @@ struct OptixBackend
 		module_compile_options.maxRegisterCount = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT;
 		module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT;
 		module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
-		optixModuleCreateFromPTX(m_optix_context, &module_compile_options, &pipeline_compile_options, ptx.c_str(), ptx.size(), log, &sizeof_log, &module);
+		OPTIX_CHECK_LOG(optixModuleCreateFromPTX(m_optix_context, &module_compile_options, &pipeline_compile_options, ptx.c_str(), ptx.size(), log, &sizeof_log, &module));
 
 		// Create program groups.
 		OptixProgramGroup raygen_prog_group = nullptr;
@@ -184,19 +243,19 @@ struct OptixBackend
 		raygen_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
 		raygen_prog_group_desc.raygen.module = module;
 		raygen_prog_group_desc.raygen.entryFunctionName = "__raygen__rg";
-		optixProgramGroupCreate(m_optix_context, &raygen_prog_group_desc, 1, &program_group_options, log, &sizeof_log, &raygen_prog_group);
+		OPTIX_CHECK_LOG(optixProgramGroupCreate(m_optix_context, &raygen_prog_group_desc, 1, &program_group_options, log, &sizeof_log, &raygen_prog_group));
 
 		OptixProgramGroupDesc miss_prog_group_desc = {};
 		miss_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
 		miss_prog_group_desc.miss.module = module;
 		miss_prog_group_desc.miss.entryFunctionName = "__miss__ms";
-		optixProgramGroupCreate(m_optix_context, &miss_prog_group_desc, 1, &program_group_options, log, &sizeof_log, &miss_prog_group);
+		OPTIX_CHECK_LOG(optixProgramGroupCreate(m_optix_context, &miss_prog_group_desc, 1, &program_group_options, log, &sizeof_log, &miss_prog_group));
 
 		OptixProgramGroupDesc hitgroup_prog_group_desc = {};
 		hitgroup_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
 		hitgroup_prog_group_desc.hitgroup.moduleCH = module;
 		hitgroup_prog_group_desc.hitgroup.entryFunctionNameCH = "__closesthit__ch";
-		optixProgramGroupCreate(m_optix_context, &hitgroup_prog_group_desc, 1, &program_group_options, log, &sizeof_log, &hitgroup_prog_group);
+		OPTIX_CHECK_LOG(optixProgramGroupCreate(m_optix_context, &hitgroup_prog_group_desc, 1, &program_group_options, log, &sizeof_log, &hitgroup_prog_group));
 
 		// Link pipeline.
 		m_optix_pipeline = nullptr;
@@ -205,31 +264,31 @@ struct OptixBackend
 		pipeline_link_options.maxTraceDepth = 5;
 		pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
 		pipeline_link_options.overrideUsesMotionBlur = false;
-		optixPipelineCreate(m_optix_context, &pipeline_compile_options, &pipeline_link_options, program_groups,
-							sizeof(program_groups) / sizeof(program_groups[0]), log, &sizeof_log, &m_optix_pipeline);
+		OPTIX_CHECK_LOG(optixPipelineCreate(m_optix_context, &pipeline_compile_options, &pipeline_link_options, program_groups,
+							sizeof(program_groups) / sizeof(program_groups[0]), log, &sizeof_log, &m_optix_pipeline));
 
 		// Set up shader binding table.
 		CUdeviceptr raygen_record;
 		const size_t raygen_record_size = sizeof(RayGenSbtRecord);
-		cudaMalloc(reinterpret_cast<void **>(&raygen_record), raygen_record_size);
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&raygen_record), raygen_record_size));
 		RayGenSbtRecord rg_sbt;
 		rg_sbt.data = {};
-		optixSbtRecordPackHeader(raygen_prog_group, &rg_sbt);
-		cudaMemcpy(reinterpret_cast<void *>(raygen_record), &rg_sbt, raygen_record_size, cudaMemcpyHostToDevice);
+		OPTIX_CHECK(optixSbtRecordPackHeader(raygen_prog_group, &rg_sbt));
+		CUDA_CHECK(cudaMemcpy(reinterpret_cast<void *>(raygen_record), &rg_sbt, raygen_record_size, cudaMemcpyHostToDevice));
 
 		CUdeviceptr miss_record;
 		size_t      miss_record_size = sizeof(MissSbtRecord);
-		cudaMalloc(reinterpret_cast<void **>(&miss_record), miss_record_size);
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&miss_record), miss_record_size));
 		MissSbtRecord ms_sbt;
-		optixSbtRecordPackHeader(miss_prog_group, &ms_sbt);
-		cudaMemcpy(reinterpret_cast<void *>(miss_record), &ms_sbt, miss_record_size, cudaMemcpyHostToDevice);
+		OPTIX_CHECK(optixSbtRecordPackHeader(miss_prog_group, &ms_sbt));
+		CUDA_CHECK(cudaMemcpy(reinterpret_cast<void *>(miss_record), &ms_sbt, miss_record_size, cudaMemcpyHostToDevice));
 
 		CUdeviceptr hitgroup_record;
 		size_t hitgroup_record_size = sizeof(HitGroupSbtRecord);
-		cudaMalloc(reinterpret_cast<void **>(&hitgroup_record), hitgroup_record_size);
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&hitgroup_record), hitgroup_record_size));
 		HitGroupSbtRecord hg_sbt;
-		optixSbtRecordPackHeader(hitgroup_prog_group, &hg_sbt);
-		cudaMemcpy(reinterpret_cast<void *>(hitgroup_record), &hg_sbt, hitgroup_record_size, cudaMemcpyHostToDevice);
+		OPTIX_CHECK(optixSbtRecordPackHeader(hitgroup_prog_group, &hg_sbt));
+		CUDA_CHECK(cudaMemcpy(reinterpret_cast<void *>(hitgroup_record), &hg_sbt, hitgroup_record_size, cudaMemcpyHostToDevice));
 
 		m_optix_sbt = {};
 		m_optix_sbt.raygenRecord = raygen_record;
@@ -251,6 +310,8 @@ struct OptixBackend
 		const RealC p1 = gather<RealC>(m_vertices_aos, p_indices * 3 + 1);
 		const RealC p2 = gather<RealC>(m_vertices_aos, p_indices * 3 + 2);
 		m_vertices = Real3C(p0, p1, p2);
+
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_param), sizeof(Params)));
 	}
 
 	TriangleHitInfoC intersect(const Ray3C & rays)
@@ -279,8 +340,6 @@ struct OptixBackend
 		param.m_result_barycentric_u = barycentric_u.data();
 		param.m_result_barycentric_v = barycentric_v.data();
 
-		CUdeviceptr d_param;
-		cudaMalloc(reinterpret_cast<void **>(&d_param), sizeof(Params));
 		cudaMemcpy(reinterpret_cast<void *>(d_param), &param, sizeof(Params), cudaMemcpyHostToDevice);
 
 		// Launch now, passing in our pipeline, launch params, and SBT
@@ -303,6 +362,8 @@ struct OptixBackend
 
 		return TriangleHitInfoC(tri_id, t, barycentric, p, geometry_normal);
 	}
+
+	CUdeviceptr d_param;
 
 	Int3C					m_triangles;
 	IntC					m_triangles_aos;
