@@ -8,24 +8,20 @@ struct Ray
 	using RealNT = RealNT_;
 	using RealT = value_t<RealNT>;
 
-	Ray():
-		m_origin(RealNT::zero_()),
-		m_dir(RealNT::zero_()),
-		m_tmin(0.0_f),
-		m_tmax(1e34_f)
+	Ray()
 	{
 	}
 
 	Ray(const RealNT & origin, const RealNT & dir):
-		Ray(origin, dir, zero<RealT>(origin.x().size()) + 0.01_f, zero<RealT>(origin.x().size()) + 1e20_f)
+		Ray(origin, dir, 0.001_f, 1e20_f)
 	{
 	}
 
 	Ray(const RealNT & origin, const RealNT & dir, RealT tmin, RealT tmax) :
 		m_origin(origin),
 		m_dir(dir),
-		m_tmin(tmin),
-		m_tmax(tmax)
+		m_tmin(zero<RealT>(origin.x().size()) + tmin),
+		m_tmax(zero<RealT>(origin.x().size()) + tmax)
 	{
 	}
 

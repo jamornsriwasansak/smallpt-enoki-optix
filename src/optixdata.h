@@ -1,13 +1,7 @@
 #include <optix.h>
 
-struct OptixRay {
-    float3 origin;
-    float tmin;
-    float3 direction;
-    float tmax;
-};
-
-struct OptixRayResult {
+struct OptixRayResult
+{
     int id;
     float t;
     float u;
@@ -24,6 +18,8 @@ struct Params
     const float * m_ray_dir_z;
     const float * m_ray_tmin;
     const float * m_ray_tmax;
+    const bool * m_ray_mask;
+    unsigned int m_ray_mask_size;
     int * m_result_tri_id;
     float * m_result_barycentric_u;
     float * m_result_barycentric_v;

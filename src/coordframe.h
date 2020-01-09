@@ -8,6 +8,7 @@ struct Frame3
 	using RealT		= Real_;
 	using Real3T	= Array<RealT, 3, false>;
 	using Mat3T		= Matrix<RealT, 3, false>;
+	using MaskT		= mask_t<RealT>;
 
 	Frame3(): m_world_from_local(empty<Mat3T>())
 	{
