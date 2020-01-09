@@ -168,27 +168,29 @@ struct OptixBackend
 
 	~OptixBackend()
 	{
+		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(m_optix_raygen_record)));
+		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(m_optix_miss_record)));
+		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(m_optix_hitgroup_record)));
+		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(m_optix_compacted_gas_buffer)));
 	}
 
 	void setup_shaders_and_program()
 	{
-		// Pipeline options must be consistent for all modules used in a
-		// single pipeline
+		// get ptx
+		std::string ptx;
+		read_source_file(ptx, "ptxfiles/wavefront_isect.ptx");
+
+		// create log
+		char log[2048];
+		size_t sizeof_log = sizeof(log);
+
+		// setup pipeline
 		OptixPipelineCompileOptions pipeline_compile_options = {};
 		pipeline_compile_options.usesMotionBlur = false;
-
-		// for our scene hierarchy. We use a single GAS – no instancing or multi-level hierarchies
-		// Our device code uses 4 payload registers (triangle_id, t, uv.x, uv.y)
 		pipeline_compile_options.traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
 		pipeline_compile_options.numPayloadValues = 4;
 		pipeline_compile_options.numAttributeValues = 0;
 		pipeline_compile_options.pipelineLaunchParamsVariableName = "params";
-
-		std::string ptx;
-		read_source_file(ptx, "ptxfiles/wavefront_isect.ptx");
-
-		char log[2048];
-		size_t sizeof_log = sizeof(log);
 
 		OptixModule module = nullptr; // The output module
 		OptixModuleCompileOptions module_compile_options = {};
@@ -197,7 +199,7 @@ struct OptixBackend
 		module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
 		OPTIX_CHECK_LOG(optixModuleCreateFromPTX(m_optix_context, &module_compile_options, &pipeline_compile_options, ptx.c_str(), ptx.size(), log, &sizeof_log, &module));
 
-		// Create program groups.
+		// create program groups
 		OptixProgramGroup raygen_prog_group = nullptr;
 		OptixProgramGroup miss_prog_group = nullptr;
 		OptixProgramGroup hitgroup_prog_group = nullptr;
@@ -220,7 +222,7 @@ struct OptixBackend
 		hitgroup_prog_group_desc.hitgroup.entryFunctionNameCH = "__closesthit__ch";
 		OPTIX_CHECK_LOG(optixProgramGroupCreate(m_optix_context, &hitgroup_prog_group_desc, 1, &program_group_options, log, &sizeof_log, &hitgroup_prog_group));
 
-		// Link pipeline.
+		// link pipeline
 		m_optix_pipeline = nullptr;
 		OptixProgramGroup program_groups[] = { raygen_prog_group, miss_prog_group, hitgroup_prog_group };
 		OptixPipelineLinkOptions pipeline_link_options = {};
@@ -230,33 +232,40 @@ struct OptixBackend
 		OPTIX_CHECK_LOG(optixPipelineCreate(m_optix_context, &pipeline_compile_options, &pipeline_link_options, program_groups,
 											sizeof(program_groups) / sizeof(program_groups[0]), log, &sizeof_log, &m_optix_pipeline));
 
-		// Set up shader binding table.
-		const size_t raygen_record_size = sizeof(RayGenSbtRecord);
-		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&m_optix_raygen_record), raygen_record_size));
+		// ray gen record
 		RayGenSbtRecord rg_sbt;
 		rg_sbt.data = {};
 		OPTIX_CHECK(optixSbtRecordPackHeader(raygen_prog_group, &rg_sbt));
-		CUDA_CHECK(cudaMemcpy(reinterpret_cast<void *>(m_optix_raygen_record), &rg_sbt, raygen_record_size, cudaMemcpyHostToDevice));
 
-		const size_t miss_record_size = sizeof(MissSbtRecord);
-		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&m_optix_miss_record), miss_record_size));
+		const size_t sizeof_RayGenSbtRecord = sizeof(RayGenSbtRecord);
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&m_optix_raygen_record), sizeof_RayGenSbtRecord));
+		CUDA_CHECK(cudaMemcpy(reinterpret_cast<void *>(m_optix_raygen_record), &rg_sbt, sizeof_RayGenSbtRecord, cudaMemcpyHostToDevice));
+
+		// miss record
 		MissSbtRecord ms_sbt;
+		ms_sbt.data = {};
 		OPTIX_CHECK(optixSbtRecordPackHeader(miss_prog_group, &ms_sbt));
-		CUDA_CHECK(cudaMemcpy(reinterpret_cast<void *>(m_optix_miss_record), &ms_sbt, miss_record_size, cudaMemcpyHostToDevice));
 
-		const size_t hitgroup_record_size = sizeof(HitGroupSbtRecord);
-		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&m_optix_hitgroup_record), hitgroup_record_size));
+		const size_t sizeof_MissSbtRecord = sizeof(MissSbtRecord);
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&m_optix_miss_record), sizeof_MissSbtRecord));
+		CUDA_CHECK(cudaMemcpy(reinterpret_cast<void *>(m_optix_miss_record), &ms_sbt, sizeof_MissSbtRecord, cudaMemcpyHostToDevice));
+
+		// hit record
 		HitGroupSbtRecord hg_sbt;
+		hg_sbt.data = {};
 		OPTIX_CHECK(optixSbtRecordPackHeader(hitgroup_prog_group, &hg_sbt));
-		CUDA_CHECK(cudaMemcpy(reinterpret_cast<void *>(m_optix_hitgroup_record), &hg_sbt, hitgroup_record_size, cudaMemcpyHostToDevice));
+
+		const size_t sizeof_HitGroupSbtRecord = sizeof(HitGroupSbtRecord);
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&m_optix_hitgroup_record), sizeof_HitGroupSbtRecord));
+		CUDA_CHECK(cudaMemcpy(reinterpret_cast<void *>(m_optix_hitgroup_record), &hg_sbt, sizeof_HitGroupSbtRecord, cudaMemcpyHostToDevice));
 
 		m_optix_sbt = {};
 		m_optix_sbt.raygenRecord = m_optix_raygen_record;
 		m_optix_sbt.missRecordBase = m_optix_miss_record;
-		m_optix_sbt.missRecordStrideInBytes = sizeof(MissSbtRecord);
+		m_optix_sbt.missRecordStrideInBytes = sizeof_MissSbtRecord;
 		m_optix_sbt.missRecordCount = 1;
 		m_optix_sbt.hitgroupRecordBase = m_optix_hitgroup_record;
-		m_optix_sbt.hitgroupRecordStrideInBytes = sizeof(HitGroupSbtRecord);
+		m_optix_sbt.hitgroupRecordStrideInBytes = sizeof_HitGroupSbtRecord;
 		m_optix_sbt.hitgroupRecordCount = 1;
 	}
 
@@ -266,6 +275,7 @@ struct OptixBackend
 		m_vertices_aos = RealC::copy(vertices_host, 3 * num_vertices);
 		cuda_eval();
 
+		const unsigned int num_meshes = 1;
 		CUdeviceptr cu_traingles_aos = reinterpret_cast<CUdeviceptr>(m_triangles_aos.data());
 		CUdeviceptr cu_vertices_aos = reinterpret_cast<CUdeviceptr>(m_vertices_aos.data());
 
@@ -287,40 +297,44 @@ struct OptixBackend
 		triangle_input.triangleArray.flags = triangle_input_flags;
 		triangle_input.triangleArray.numSbtRecords = 1;
 
+		// setup accel emit description
+		CUdeviceptr compacted_size_buffer;
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&compacted_size_buffer), sizeof(uint64_t)));
+		OptixAccelEmitDesc emit_property = {};
+		emit_property.type = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
+		emit_property.result = compacted_size_buffer;
+		const unsigned int num_emit_property = 1;
+
+		// compute size of temp_buffer and output_buffer needed for constructing GAS
 		OptixAccelBufferSizes gas_buffer_size;
-		optixAccelComputeMemoryUsage(m_optix_context, &accel_options, &triangle_input, 1, &gas_buffer_size);
+		optixAccelComputeMemoryUsage(m_optix_context, &accel_options, &triangle_input, num_meshes, &gas_buffer_size);
 
-		CUdeviceptr temp_buffer_gas;
-		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&temp_buffer_gas), gas_buffer_size.tempSizeInBytes));
-		CUdeviceptr buffer_temp_output_gas_and_compacted_size;
-		size_t compacted_size_offset = ceil2int<size_t>(gas_buffer_size.outputSizeInBytes / 8.0_f) * 8;
-		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&buffer_temp_output_gas_and_compacted_size), compacted_size_offset + 8));
+		// create temp_buffer for optixAccelBuild
+		CUdeviceptr temp_buffer;
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&temp_buffer), gas_buffer_size.tempSizeInBytes));
 
-		m_optix_gas_handle = 0;
+		// create output_buffer for optixAccelBuild
+		CUdeviceptr output_buffer;
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&output_buffer), gas_buffer_size.outputSizeInBytes));
 
-		OptixAccelEmitDesc emitProperty = {};
-		emitProperty.type = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
-		emitProperty.result = (CUdeviceptr)((char *)buffer_temp_output_gas_and_compacted_size + compacted_size_offset);
-		unsigned int numEmitProperty = 1;
-		OPTIX_CHECK(optixAccelBuild(m_optix_context, 0, &accel_options, &triangle_input, 1, temp_buffer_gas, gas_buffer_size.tempSizeInBytes,
-									buffer_temp_output_gas_and_compacted_size, gas_buffer_size.outputSizeInBytes, &m_optix_gas_handle,
-									&emitProperty, numEmitProperty));
-		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(temp_buffer_gas)));
+		// build data structure
+		OPTIX_CHECK(optixAccelBuild(m_optix_context, 0, &accel_options, &triangle_input, num_meshes,
+									temp_buffer, gas_buffer_size.tempSizeInBytes,
+									output_buffer, gas_buffer_size.outputSizeInBytes,
+									&m_optix_gas_handle, &emit_property, num_emit_property));
 
-		// compact
-		size_t compacted_gas_size;
-		CUdeviceptr gas_output_buffer;
-		CUDA_CHECK(cudaMemcpy(&compacted_gas_size, (void *)emitProperty.result, sizeof(size_t), cudaMemcpyDeviceToHost));
-		if (compacted_gas_size < gas_buffer_size.outputSizeInBytes)
-		{
-			CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&gas_output_buffer), compacted_gas_size));
-			OPTIX_CHECK(optixAccelCompact(m_optix_context, 0, m_optix_gas_handle, gas_output_buffer, compacted_gas_size, &m_optix_gas_handle));
-			CUDA_CHECK(cudaFree((void *)buffer_temp_output_gas_and_compacted_size));
-		}
-		else
-		{
-			gas_output_buffer = buffer_temp_output_gas_and_compacted_size;
-		}
+		// get GAS' compacted size
+		uint64_t compacted_size = 0;
+		CUDA_CHECK(cudaMemcpy(&compacted_size, reinterpret_cast<void *>(compacted_size_buffer), sizeof(uint64_t), cudaMemcpyDeviceToHost));
+
+		// perform compaction
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&m_optix_compacted_gas_buffer), compacted_size));
+		OPTIX_CHECK(optixAccelCompact(m_optix_context, 0, m_optix_gas_handle, m_optix_compacted_gas_buffer, compacted_size, &m_optix_gas_handle));
+
+		// free!
+		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(compacted_size_buffer)));
+		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(temp_buffer)));
+		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(output_buffer)));
 	}
 
 	Int3C get_triangle(const IntC & indices, const BoolC & mask = true)
@@ -373,7 +387,7 @@ struct OptixBackend
 
 		cudaMemcpy(reinterpret_cast<void *>(d_param), &param, sizeof(Params), cudaMemcpyHostToDevice);
 
-		// Launch now, passing in our pipeline, launch params, and SBT
+		// launch optix
 		const Uint sizeof_Params = sizeof(Params);
 		optixLaunch(m_optix_pipeline, 0, d_param, sizeof_Params, &m_optix_sbt, Uint(num_rays), 1,  1); 
 
@@ -394,6 +408,7 @@ struct OptixBackend
 	IntC					m_triangles_aos;
 	RealC					m_vertices_aos;
 	CUdeviceptr				m_optix_raygen_record, m_optix_miss_record, m_optix_hitgroup_record;
+	CUdeviceptr				m_optix_compacted_gas_buffer;
 	OptixDeviceContext		m_optix_context;
 	OptixPipeline			m_optix_pipeline;
 	OptixTraversableHandle	m_optix_gas_handle;
