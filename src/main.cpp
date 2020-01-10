@@ -24,7 +24,8 @@ struct Bsdf
 {
 	virtual std::tuple<SpectrumC, Real3C> sample(const Real3C & incoming,
 												 const Real3C & texture_coord,
-												 const Real2C & sample) const = 0;
+												 const Real2C & sample,
+												 const BoolC & mask = true) const = 0;
 };
 
 ENOKI_CALL_SUPPORT_BEGIN(Bsdf)
@@ -39,9 +40,10 @@ struct LambertBsdf : public Bsdf
 
 	std::tuple<SpectrumC, Real3C> sample(const Real3C & incoming,
 										 const Real3C & texture_coord,
-										 const Real2C & sample) const override
+										 const Real2C & sample,
+										 const BoolC & mask = true) const override
 	{
-		SpectrumC outgoing = cosine_weighted_hemisphere_from_square(sample);
+		SpectrumC outgoing = select(mask, cosine_weighted_hemisphere_from_square(sample), empty<SpectrumC>());
 		return std::make_tuple(m_reflectance, outgoing);
 	}
 
@@ -135,7 +137,7 @@ int main()
 		const auto [hit_info, hit_mask] = optix_backend.intersect(rays);
 
 		const Frame3C coord_frame(hit_info.m_geometry_normal);
-		const IntC mat_index = gather<IntC>(material_id, hit_info.m_tri_id, hit_info.m_tri_id >= 0);
+		const IntC mat_index = gather<IntC>(material_id, hit_info.m_tri_id, hit_mask);
 		const CUDAArray<Bsdf *> bsdf = gather<CUDAArray<Bsdf *>>(materials, mat_index);
 
 		const Real2C second_sample = Real2C(rng.next_float32(), rng.next_float32());
