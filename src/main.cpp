@@ -116,10 +116,13 @@ std::tuple<std::vector<int3>, std::vector<int>, std::vector<float3>, std::vector
 	// get materials
 	const size_t num_materials = tiny_mat.size();
 	std::vector<std::shared_ptr<Bsdf>> materials(num_materials + 1);
-	materials[0] = std::make_shared<LambertBsdf>(SpectrumC(1.0_f));
+	materials[0] = std::make_shared<LambertBsdf>(SpectrumC(0.5_f));
 	for (size_t i_material = 0; i_material < num_materials; i_material++)
 	{
-		materials[i_material + 1] = std::make_shared<LambertBsdf>(SpectrumC(1.0_f));
+		const Real r = tiny_mat[i_material].diffuse[0];
+		const Real g = tiny_mat[i_material].diffuse[1];
+		const Real b = tiny_mat[i_material].diffuse[2];
+		materials[i_material + 1] = std::make_shared<LambertBsdf>(SpectrumC(r, g, b));
 	}
 
 	return std::make_tuple(triangles, per_face_material_id, vertices, materials);
