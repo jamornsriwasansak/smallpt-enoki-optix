@@ -18,7 +18,7 @@ struct Frame3
 	{
 		const RealT sign = copysign(1.0_f, normal.y());
 		const RealT a = -1.0_f / (sign + normal.y());
-		const RealT b = normal.z() + normal.x() * a;
+		const RealT b = normal.z() * normal.x() * a;
 		const Real3T basis_x = Real3T(sign + normal[0] * normal[0] * a, -normal[0], b);
 		const Real3T basis_y = normal;
 		const Real3T basis_z = Real3T(sign * b, -sign * normal[2], 1.0_f + sign * normal[2] * normal[2] * a);

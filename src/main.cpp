@@ -116,10 +116,10 @@ std::tuple<std::vector<int3>, std::vector<int>, std::vector<float3>, std::vector
 	// get materials
 	const size_t num_materials = tiny_mat.size();
 	std::vector<std::shared_ptr<Bsdf>> materials(num_materials + 1);
-	materials[0] = std::make_shared<LambertBsdf>(SpectrumC(0.5_f));
+	materials[0] = std::make_shared<LambertBsdf>(SpectrumC(1.0_f));
 	for (size_t i_material = 0; i_material < num_materials; i_material++)
 	{
-		materials[i_material + 1] = std::make_shared<LambertBsdf>(SpectrumC(0.5_f));
+		materials[i_material + 1] = std::make_shared<LambertBsdf>(SpectrumC(1.0_f));
 	}
 
 	return std::make_tuple(triangles, per_face_material_id, vertices, materials);
@@ -127,7 +127,7 @@ std::tuple<std::vector<int3>, std::vector<int>, std::vector<float3>, std::vector
 
 int main()
 {
-	auto [triangles_host, material_ids_host, vertices_host, materials_host] = load_meshes("cow.obj");
+	auto [triangles_host, material_ids_host, vertices_host, materials_host] = load_meshes("mitsuba.obj");
 	IntC material_id = IntC::copy(material_ids_host.data(), material_ids_host.size());
 	CUDAArray<Bsdf *> materials = CUDAArray<Bsdf *>::copy(raw_ptrs(materials_host).data(), materials_host.size());
 
@@ -139,7 +139,7 @@ int main()
 	SpectrumC film = zero<SpectrumC>(width * height);
 
 	PCG32<RealC> rng(PCG32_DEFAULT_STATE, arange<RealC>(width * height));
-	int num_samples = 1000;
+	int num_samples = 50;
 	StopWatch sw;
 	sw.reset();
 	for (int i = 0; i < num_samples; i++)
@@ -150,7 +150,7 @@ int main()
 		const IntC y = pixel_index / width;
 		const IntC x = pixel_index % width;
 		const Int2C pixel(x, y);
-		const ThinlensCamera thinlens(Real3(0.0_f, 0.03_f, 0.2_f), Real3(0.0_f, 0.03_f, 0.0_f), Real3(0.0_f, 1.0_f, 0.0_f), 0.00_f, 1.0_f, 70.0_f / 180.0_f * M_PI_f);
+		const ThinlensCamera thinlens(Real3(0.0_f, 3.03_f, 5.0_f), Real3(0.0_f, 0.03_f, 0.0_f), Real3(0.0_f, 1.0_f, 0.0_f), 0.00_f, 1.0_f, 70.0_f / 180.0_f * M_PI_f);
 		const Real3C origin = thinlens.sample_pos(Real2C(rng.next_float32(), rng.next_float32()));
 		const Real3C direction = thinlens.sample_dir(pixel, origin, Int2(width, height), Real2C(rng.next_float32(), rng.next_float32()));
 		const Ray3C rays(origin, direction);
@@ -162,7 +162,7 @@ int main()
 
 		const Real2C second_sample = Real2C(rng.next_float32(), rng.next_float32());
 		const Real3C incoming_local = coord_frame.to_local(-direction);
-		auto [bsdf_contrib, outgoing_local] = bsdf->sample(incoming_local, hit_info.m_position, second_sample);
+		auto [bsdf_contrib, outgoing_local] = bsdf->sample(incoming_local, hit_info.m_position, second_sample, hit_mask);
 		const Real3C outgoing = coord_frame.to_world(outgoing_local);
 
 		// sample out going direction
@@ -176,11 +176,15 @@ int main()
 	std::cout << sw.timeMilliSec() << std::endl;
 
 	// image write
-	float * film_host = new float[width * height];
-	cuda_fetch_element(film_host, film.data()->index_(), 0, sizeof(int) * width * height);
+	float * film_host_r = new float[width * height];
+	float * film_host_g = new float[width * height];
+	float * film_host_b = new float[width * height];
+	cuda_fetch_element(film_host_r, film.x().index_(), 0, sizeof(int) * width * height);
+	cuda_fetch_element(film_host_g, film.y().index_(), 0, sizeof(int) * width * height);
+	cuda_fetch_element(film_host_b, film.z().index_(), 0, sizeof(int) * width * height);
 
 	std::cout << "writing image" << std::endl;
-	Fimage::save_pfm_mono(film_host, width, height, "test.pfm");
+	Fimage::save_pfm(film_host_r, film_host_g, film_host_b, width, height, "test.pfm");
 
 	std::cout << "done" << std::endl;
 	return 0;

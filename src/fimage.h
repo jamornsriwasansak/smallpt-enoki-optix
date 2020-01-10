@@ -29,4 +29,31 @@ struct Fimage
 
 		os.close();
 	}
+
+	static void save_pfm(const float * r, const float * g, const float * b, const size_t width, const size_t height, const std::filesystem::path & filepath)
+	{
+		// write PFM header
+		std::ofstream os(filepath, std::ios::binary);
+		if (!os.is_open())
+		{
+			std::cout << "slkdjflksjdlfkjsdf" << std::endl;
+		}
+		os << "PF" << std::endl;
+		os << width << " " << height << std::endl;
+		os << "-1" << std::endl;
+
+		// write data flip row
+		for (size_t y = 0; y < height; y++)
+			for (size_t x = 0; x < width; x++)
+			{
+				float vr = r[(height - y - 1) * width + x];
+				os.write((char *)(&vr), sizeof(float));
+				float vg = g[(height - y - 1) * width + x];
+				os.write((char *)(&vg), sizeof(float));
+				float vb = b[(height - y - 1) * width + x];
+				os.write((char *)(&vb), sizeof(float));
+			}
+
+		os.close();
+	}
 };
