@@ -148,7 +148,7 @@ int main()
 		// sample out going direction
 		const Ray3C second_rays(hit_info.m_position, outgoing);
 		const auto [second_hit_info, second_hit_mask] = optix_backend.intersect(second_rays, hit_mask);
-		film += bsdf_contrib * select(neq(hit_info.m_tri_id, -1) && eq(second_hit_info.m_tri_id, -1), zero<RealC>(num_pixels) + 1.0_f, zero<RealC>(num_pixels) + 0.0_f);
+		film += bsdf_contrib * select(neq(hit_info.m_tri_id, -1) && eq(second_hit_info.m_tri_id, -1), full<RealC>(1.0_f, num_pixels), full<RealC>(0.0_f, num_pixels));
 	}
 
 	film /= Real(num_samples);
