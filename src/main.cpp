@@ -61,58 +61,78 @@ std::vector<T *> raw_ptrs(const std::vector<std::shared_ptr<T>> & shared_ptrs)
 	return result;
 }
 
-int main()
+std::tuple<std::vector<int3>, std::vector<int>, std::vector<float3>, std::vector<std::shared_ptr<Bsdf>>> load_meshes(const std::string & path)
 {
 	// load mesh
 	tinyobj::ObjReader obj_reader;
 	tinyobj::ObjReaderConfig obj_reader_config;
 	obj_reader_config.triangulate = true;
 	obj_reader_config.vertex_color = false;
-	bool ret = obj_reader.ParseFromFile("cow.obj", obj_reader_config);
+	bool ret = obj_reader.ParseFromFile(path, obj_reader_config);
 
-	const tinyobj::attrib_t & tiny_attrib = obj_reader.GetAttrib();
-	const tinyobj::shape_t & tiny_shape = obj_reader.GetShapes()[0];
-	const std::vector<tinyobj::material_t> & tiny_mat = obj_reader.GetMaterials();
-
-	const size_t num_triangles = tiny_shape.mesh.num_face_vertices.size();
-	const size_t num_vertices = tiny_attrib.vertices.size() / 3;
-	const size_t num_materials = tiny_mat.size();
-
-	int3 * triangles_host = new int3[num_triangles];
-	int * material_id_host = new int[num_triangles];
-	float3 * vertices_host = new float3[num_vertices];
-
-	for (size_t i_face = 0; i_face < num_triangles; i_face++)
+	// compute num_all_triangles
+	const size_t num_shapes = obj_reader.GetShapes().size();
+	size_t num_all_triangles = 0;
+	for (size_t i_shape = 0; i_shape < num_shapes; i_shape++)
 	{
-		// copy triangles
-		triangles_host[i_face].x = tiny_shape.mesh.indices[i_face * 3 + 0].vertex_index;
-		triangles_host[i_face].y = tiny_shape.mesh.indices[i_face * 3 + 1].vertex_index;
-		triangles_host[i_face].z = tiny_shape.mesh.indices[i_face * 3 + 2].vertex_index;
-
-		// copy per triangle material id
-		material_id_host[i_face] = tiny_shape.mesh.material_ids[i_face] + 1;
+		const tinyobj::shape_t & tiny_shape = obj_reader.GetShapes()[i_shape];
+		num_all_triangles += tiny_shape.mesh.num_face_vertices.size();
 	}
 
+	// get triangles and material_id
+	std::vector<int3> triangles(num_all_triangles);
+	std::vector<int> per_face_material_id(num_all_triangles);
+	const std::vector<tinyobj::material_t> & tiny_mat = obj_reader.GetMaterials();
+	size_t i_face_offset = 0;
+	for (size_t i_shape = 0; i_shape < num_shapes; i_shape++)
+	{
+		const tinyobj::shape_t & tiny_shape = obj_reader.GetShapes()[i_shape];
+		const size_t num_triangles = tiny_shape.mesh.num_face_vertices.size();
+		for (size_t i_face = 0; i_face < num_triangles; i_face++)
+		{
+			// copy triangles
+			triangles[i_face + i_face_offset].x = tiny_shape.mesh.indices[i_face * 3 + 0].vertex_index;
+			triangles[i_face + i_face_offset].y = tiny_shape.mesh.indices[i_face * 3 + 1].vertex_index;
+			triangles[i_face + i_face_offset].z = tiny_shape.mesh.indices[i_face * 3 + 2].vertex_index;
+
+			// copy per triangle material id
+			per_face_material_id[i_face + i_face_offset] = tiny_shape.mesh.material_ids[i_face] + 1;
+		}
+		i_face_offset += num_triangles;
+	}
+
+	// get vertices
+	const tinyobj::attrib_t & tiny_attrib = obj_reader.GetAttrib();
+	const size_t num_vertices = tiny_attrib.vertices.size() / 3;
+	std::vector<float3> vertices(num_vertices);
 	for (size_t i_vertex = 0; i_vertex < num_vertices; i_vertex++)
 	{
 		// copy vertices
-		vertices_host[i_vertex].x = tiny_attrib.vertices[i_vertex * 3 + 0];
-		vertices_host[i_vertex].y = tiny_attrib.vertices[i_vertex * 3 + 1];
-		vertices_host[i_vertex].z = tiny_attrib.vertices[i_vertex * 3 + 2];
+		vertices[i_vertex].x = tiny_attrib.vertices[i_vertex * 3 + 0];
+		vertices[i_vertex].y = tiny_attrib.vertices[i_vertex * 3 + 1];
+		vertices[i_vertex].z = tiny_attrib.vertices[i_vertex * 3 + 2];
 	}
 
-	IntC material_id = IntC::copy(material_id_host, num_triangles);
-
-	std::vector<std::shared_ptr<Bsdf>> materials_host;
-	materials_host.push_back(std::make_shared<LambertBsdf>(SpectrumC(0.5_f)));
+	// get materials
+	const size_t num_materials = tiny_mat.size();
+	std::vector<std::shared_ptr<Bsdf>> materials(num_materials + 1);
+	materials[0] = std::make_shared<LambertBsdf>(SpectrumC(0.5_f));
 	for (size_t i_material = 0; i_material < num_materials; i_material++)
 	{
-		materials_host.push_back(std::make_shared<LambertBsdf>(SpectrumC(0.5_f)));
+		materials[i_material + 1] = std::make_shared<LambertBsdf>(SpectrumC(0.5_f));
 	}
+
+	return std::make_tuple(triangles, per_face_material_id, vertices, materials);
+}
+
+int main()
+{
+	auto [triangles_host, material_ids_host, vertices_host, materials_host] = load_meshes("cow.obj");
+	IntC material_id = IntC::copy(material_ids_host.data(), material_ids_host.size());
 	CUDAArray<Bsdf *> materials = CUDAArray<Bsdf *>::copy(raw_ptrs(materials_host).data(), materials_host.size());
 
 	OptixBackend optix_backend;
-	optix_backend.set_triangles_soup(triangles_host, num_triangles, vertices_host, num_vertices);
+	optix_backend.set_triangles_soup(triangles_host.data(), triangles_host.size(), vertices_host.data(), vertices_host.size());
 	int width = 1920;
 	int height = 1080;
 

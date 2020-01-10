@@ -279,12 +279,12 @@ struct OptixBackend
 		CUdeviceptr cu_traingles_aos = reinterpret_cast<CUdeviceptr>(m_triangles_aos.data());
 		CUdeviceptr cu_vertices_aos = reinterpret_cast<CUdeviceptr>(m_vertices_aos.data());
 
-		// Specify options for the build. We use default options for simplicity.
+		// specify options for the build
 		OptixAccelBuildOptions accel_options = {};
 		accel_options.buildFlags = OPTIX_BUILD_FLAG_NONE | OPTIX_BUILD_FLAG_ALLOW_COMPACTION;
 		accel_options.operation = OPTIX_BUILD_OPERATION_BUILD;
 
-		// Allocate and copy device memory for our input triangle vertices
+		// allocate and copy triangles
 		const uint32_t triangle_input_flags[1] = { OPTIX_GEOMETRY_FLAG_NONE };
 		OptixBuildInput triangle_input = {};
 		triangle_input.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
