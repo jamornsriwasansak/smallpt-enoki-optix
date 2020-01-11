@@ -117,4 +117,6 @@ struct SpectrumT : enoki::StaticArrayImpl<Value_, Size_, Approx_, Mode_, false, 
         ? Mode_ : RoundingMode::Default>;
     ENOKI_ARRAY_IMPORT(Base, SpectrumT)
 };
+
+using Spectrum = SpectrumT<Real, 3, false, RoundingMode::Default>;
 using SpectrumC = SpectrumT<RealC, 3, false, RoundingMode::Default>;

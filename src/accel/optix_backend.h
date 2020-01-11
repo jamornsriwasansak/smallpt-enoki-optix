@@ -168,10 +168,10 @@ struct OptixBackend
 
 	~OptixBackend()
 	{
-		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(m_optix_raygen_record)));
-		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(m_optix_miss_record)));
-		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(m_optix_hitgroup_record)));
-		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(m_optix_compacted_gas_buffer)));
+		cudaFree(reinterpret_cast<void *>(m_optix_raygen_record));
+		cudaFree(reinterpret_cast<void *>(m_optix_miss_record));
+		cudaFree(reinterpret_cast<void *>(m_optix_hitgroup_record));
+		cudaFree(reinterpret_cast<void *>(m_optix_compacted_gas_buffer));
 	}
 
 	void setup_shaders_and_program()
@@ -379,7 +379,7 @@ struct OptixBackend
 		param.m_ray_tmin = rays.m_tmin.data();
 		param.m_ray_tmax = rays.m_tmax.data();
 		param.m_ray_mask = mask.data();
-		param.m_ray_mask_size = mask.size();
+		param.m_ray_mask_size = Uint(mask.size());
 		param.m_result_tri_id = tri_id.data();
 		param.m_result_t = t.data();
 		param.m_result_barycentric_u = barycentric_u.data();
