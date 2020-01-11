@@ -14,7 +14,8 @@ struct Frame3
 	{
 	}
 
-	Frame3(const Real3T & normal)
+	Frame3(const Real3T & normal):
+		m_world_from_local(empty<Mat3T>())
 	{
 		const RealT sign = copysign(1.0_f, normal.y());
 		const RealT a = -1.0_f / (sign + normal.y());
@@ -28,23 +29,22 @@ struct Frame3
 								   basis_x.z(), basis_y.z(), basis_z.z());
 	}
 
-	Frame3(const Real3T & basis_x, const Real3T & basis_y, const Real3T & basis_z)
+	Frame3(const Real3T & basis_x, const Real3T & basis_y, const Real3T & basis_z):
+		m_world_from_local(empty<Mat3T>())
 	{
 		m_world_from_local = Mat3T(basis_x.x(), basis_y.x(), basis_z.x(),
 								   basis_x.y(), basis_y.y(), basis_z.y(),
 								   basis_x.z(), basis_y.z(), basis_z.z());
 	}
 
-	template <typename Real3TT>
-	Real3TT to_local(const Real3TT & world) const
+	Real3T to_local(const Real3T & world, const MaskT & mask = true) const
 	{
-		return transpose(m_world_from_local) * world;
+		return select(mask, transpose(m_world_from_local) * world, empty<Real3T>());
 	}
 
-	template <typename Real3TT>
-	Real3TT to_world(const Real3TT & local) const
+	Real3T to_world(const Real3T & local, const MaskT & mask = true) const
 	{
-		return m_world_from_local * local;
+		return select(mask, m_world_from_local * local, empty<Real3T>());
 	}
 
 	Mat3T m_world_from_local;

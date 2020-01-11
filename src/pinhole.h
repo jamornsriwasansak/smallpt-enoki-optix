@@ -21,7 +21,7 @@ struct ThinlensCamera
 		m_x = normalize(cross(up, m_z));
 		m_y = normalize(cross(m_z, m_x));
 		
-		m_frame = Frame3S(m_x, m_y, m_z);
+		m_frame = Frame3C(m_x, m_y, m_z);
 	}
 
 	Real3C sample_pos(const Real2C & sample) const
@@ -68,5 +68,5 @@ struct ThinlensCamera
 	Real	m_lens_area;
 	Real	m_fov_y;
 
-	Frame3S	m_frame;
+	Frame3C	m_frame;
 };
