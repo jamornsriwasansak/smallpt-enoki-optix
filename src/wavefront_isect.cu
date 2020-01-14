@@ -106,7 +106,7 @@ void __raygen__rg()
 
         params.m_result_t[linear_idx] = int_as_float(t);
         params.m_result_tri_id[linear_idx] = id;
-        params.m_result_barycentric_u[linear_idx] = (1.0f - int_as_float(v) - int_as_float(u));
-        params.m_result_barycentric_v[linear_idx] = int_as_float(u);
+        params.m_result_barycentric_u[linear_idx] = int_as_float(u);
+        params.m_result_barycentric_v[linear_idx] = int_as_float(v);
     }
 }

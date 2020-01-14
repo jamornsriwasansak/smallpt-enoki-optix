@@ -92,7 +92,8 @@ ENOKI_CALL_SUPPORT_END(Bsdf)
 
 struct LambertBsdf : public Bsdf
 {
-	LambertBsdf(const Spectrum & reflectance): m_reflectance(std::make_shared<ImageTexture>(reflectance))
+	LambertBsdf(const Spectrum & reflectance):
+		m_reflectance(std::make_shared<ImageTexture>(reflectance))
 	{
 	}
 
@@ -101,8 +102,8 @@ struct LambertBsdf : public Bsdf
 										 const Real2C & sample,
 										 const BoolC & mask = true) const override
 	{
-		SpectrumC outgoing = select(mask, cosine_weighted_hemisphere_from_square(sample), empty<SpectrumC>());
-		SpectrumC contrib = select(mask, m_reflectance->eval(texture_coord), empty<SpectrumC>());
+		SpectrumC outgoing = cosine_weighted_hemisphere_from_square(sample);
+		SpectrumC contrib = m_reflectance->eval(texture_coord, mask);
 		return std::make_tuple(contrib, outgoing);
 	}
 
@@ -120,7 +121,15 @@ std::vector<T *> raw_ptrs(const std::vector<std::shared_ptr<T>> & shared_ptrs)
 	return result;
 }
 
-std::tuple<std::vector<int3>, std::vector<int>, std::vector<float3>, std::vector<LambertBsdf *>> load_meshes(const std::string & path)
+std::tuple<
+	std::vector<int3>, /* per face position indices */
+	std::vector<float3>, /* position */
+	std::vector<int3>, /* per face normal indices */
+	std::vector<float3>, /* normal */
+	std::vector<int3>, /* per face texcoord indices */
+	std::vector<float2>, /* texcoord */
+	std::vector<int>, /* per triangle material id */
+	std::vector<std::shared_ptr<LambertBsdf>>> load_meshes(const std::string & path)
 {
 	// load mesh
 	tinyobj::ObjReader obj_reader;
@@ -139,7 +148,9 @@ std::tuple<std::vector<int3>, std::vector<int>, std::vector<float3>, std::vector
 	}
 
 	// get triangles and material_id
-	std::vector<int3> triangles(num_all_triangles);
+	std::vector<int3> per_face_position_indices(num_all_triangles);
+	std::vector<int3> per_face_shading_normal_indices(num_all_triangles);
+	std::vector<int3> per_face_texcoord_indices(num_all_triangles);
 	std::vector<int> per_face_material_id(num_all_triangles);
 	const std::vector<tinyobj::material_t> & tiny_mat = obj_reader.GetMaterials();
 	size_t i_face_offset = 0;
@@ -149,10 +160,17 @@ std::tuple<std::vector<int3>, std::vector<int>, std::vector<float3>, std::vector
 		const size_t num_triangles = tiny_shape.mesh.num_face_vertices.size();
 		for (size_t i_face = 0; i_face < num_triangles; i_face++)
 		{
-			// copy triangles
-			triangles[i_face + i_face_offset].x = tiny_shape.mesh.indices[i_face * 3 + 0].vertex_index;
-			triangles[i_face + i_face_offset].y = tiny_shape.mesh.indices[i_face * 3 + 1].vertex_index;
-			triangles[i_face + i_face_offset].z = tiny_shape.mesh.indices[i_face * 3 + 2].vertex_index;
+			per_face_position_indices[i_face + i_face_offset].x = tiny_shape.mesh.indices[i_face * 3 + 0].vertex_index;
+			per_face_position_indices[i_face + i_face_offset].y = tiny_shape.mesh.indices[i_face * 3 + 1].vertex_index;
+			per_face_position_indices[i_face + i_face_offset].z = tiny_shape.mesh.indices[i_face * 3 + 2].vertex_index;
+
+			per_face_shading_normal_indices[i_face + i_face_offset].x = tiny_shape.mesh.indices[i_face * 3 + 0].normal_index;
+			per_face_shading_normal_indices[i_face + i_face_offset].y = tiny_shape.mesh.indices[i_face * 3 + 1].normal_index;
+			per_face_shading_normal_indices[i_face + i_face_offset].z = tiny_shape.mesh.indices[i_face * 3 + 2].normal_index;
+
+			per_face_texcoord_indices[i_face + i_face_offset].x = tiny_shape.mesh.indices[i_face * 3 + 0].texcoord_index;
+			per_face_texcoord_indices[i_face + i_face_offset].y = tiny_shape.mesh.indices[i_face * 3 + 1].texcoord_index;
+			per_face_texcoord_indices[i_face + i_face_offset].z = tiny_shape.mesh.indices[i_face * 3 + 2].texcoord_index;
 
 			// copy per triangle material id
 			per_face_material_id[i_face + i_face_offset] = tiny_shape.mesh.material_ids[i_face] + 1;
@@ -160,86 +178,150 @@ std::tuple<std::vector<int3>, std::vector<int>, std::vector<float3>, std::vector
 		i_face_offset += num_triangles;
 	}
 
-	// get vertices
+	// get vertices information
 	const tinyobj::attrib_t & tiny_attrib = obj_reader.GetAttrib();
-	const size_t num_vertices = tiny_attrib.vertices.size() / 3;
-	std::vector<float3> vertices(num_vertices);
-	for (size_t i_vertex = 0; i_vertex < num_vertices; i_vertex++)
+
+	// vertices
+	const size_t num_positions = tiny_attrib.vertices.size() / 3;
+	std::vector<float3> positions(num_positions);
+	for (size_t i_vertex = 0; i_vertex < num_positions; i_vertex++)
 	{
 		// copy vertices
-		vertices[i_vertex].x = tiny_attrib.vertices[i_vertex * 3 + 0];
-		vertices[i_vertex].y = tiny_attrib.vertices[i_vertex * 3 + 1];
-		vertices[i_vertex].z = tiny_attrib.vertices[i_vertex * 3 + 2];
+		positions[i_vertex].x = tiny_attrib.vertices[i_vertex * 3 + 0];
+		positions[i_vertex].y = tiny_attrib.vertices[i_vertex * 3 + 1];
+		positions[i_vertex].z = tiny_attrib.vertices[i_vertex * 3 + 2];
+	}
+
+	// normals
+	const size_t num_shading_normals = tiny_attrib.normals.size() / 3;
+	std::vector<float3> shading_normals(num_shading_normals);
+	for (size_t i_normal = 0; i_normal < num_shading_normals; i_normal++)
+	{
+		// copy normals
+		shading_normals[i_normal].x = tiny_attrib.normals[i_normal * 3 + 0];
+		shading_normals[i_normal].y = tiny_attrib.normals[i_normal * 3 + 1];
+		shading_normals[i_normal].z = tiny_attrib.normals[i_normal * 3 + 2];
+	}
+
+	// texcoords
+	const size_t num_texcoords = tiny_attrib.texcoords.size() / 2;
+	std::vector<float2> texcoords(num_texcoords);
+	for (size_t i_texcoord = 0; i_texcoord < num_texcoords; i_texcoord++)
+	{
+		// copy texture coords
+		texcoords[i_texcoord].x = tiny_attrib.texcoords[i_texcoord * 2 + 0];
+		texcoords[i_texcoord].y = tiny_attrib.texcoords[i_texcoord * 2 + 1];
 	}
 
 	// get materials
 	const size_t num_materials = tiny_mat.size();
-	std::vector<LambertBsdf *> materials(num_materials + 1);
-	materials[0] = new LambertBsdf(Spectrum(0.5_f));
+	
+	// init materials vector
+	std::vector<std::shared_ptr<LambertBsdf>> materials(num_materials + 1);
+
+	// start with default material at 0
+	materials[0] = std::make_shared<LambertBsdf>(Spectrum(0.5_f));
+
+	// push the rest of materials
 	for (size_t i_material = 0; i_material < num_materials; i_material++)
 	{
 		const Real r = tiny_mat[i_material].diffuse[0];
 		const Real g = tiny_mat[i_material].diffuse[1];
 		const Real b = tiny_mat[i_material].diffuse[2];
-		materials[i_material + 1] = new LambertBsdf(Spectrum(r, g, b));
+		materials[i_material + 1] = std::make_shared<LambertBsdf>(Spectrum(r, g, b));
 	}
 
-	return std::make_tuple(triangles, per_face_material_id, vertices, materials);
+	return std::make_tuple(per_face_position_indices, positions,
+						   per_face_shading_normal_indices, shading_normals,
+						   per_face_texcoord_indices, texcoords,
+						   per_face_material_id, materials);
 }
 
 int main()
 {
-	auto [triangles_host, material_ids_host, vertices_host, materials_host] = load_meshes("mitsuba.obj");
-	IntC material_id = IntC::copy(material_ids_host.data(), material_ids_host.size());
-	CUDAArray<LambertBsdf *> materials = CUDAArray<LambertBsdf *>::copy(materials_host.data(), materials_host.size());
+	// all const
+	const int width = 1920;
+	const int height = 1080;
+	const int num_pixels = width * height;
+	const int num_samples = 50;
+	const int num_bounces = 3;
 
+	// load meshes and materials
+	auto [per_face_position_indices, positions,
+		per_face_shading_normal_indices, shading_normals,
+		per_face_texcoord_indices, texcoords,
+		per_face_material_id, materials_host] = load_meshes("mitsuba.obj");
+	IntC material_id = IntC::copy(per_face_material_id.data(), per_face_material_id.size());
+	CUDAArray<LambertBsdf *> materials = CUDAArray<LambertBsdf *>::copy(raw_ptrs(materials_host).data(), materials_host.size());
+
+	// setup optix back end
 	OptixBackend optix_backend;
-	optix_backend.set_triangles_soup(triangles_host.data(), triangles_host.size(), vertices_host.data(), vertices_host.size());
-	int width = 1920;
-	int height = 1080;
+	optix_backend.set_triangles_soup(per_face_position_indices, positions,
+									 per_face_shading_normal_indices, shading_normals,
+									 per_face_texcoord_indices, texcoords);
 
+	// init film
 	SpectrumC film = zero<SpectrumC>(width * height);
 
-	PCG32<RealC> rng(PCG32_DEFAULT_STATE, arange<RealC>(width * height));
-	const int num_samples = 256;
-	const int num_bounces = 2;
+	// init timer
 	StopWatch sw;
 	sw.reset();
+
+	// init RNG
+	PCG32<RealC> rng(PCG32_DEFAULT_STATE, arange<RealC>(num_pixels));
+
+	// sample thinlens
+	const IntC pixel_index = arange<IntC>(num_pixels);
+	const IntC y = pixel_index / width;
+	const IntC x = pixel_index % width;
+	const Int2C pixel(x, y);
+	const ThinlensCamera thinlens(Real3(0.0_f, 3.03_f, 5.0_f), Real3(0.0_f, 0.03_f, 0.0_f), Real3(0.0_f, 1.0_f, 0.0_f), 0.00_f, 1.0_f, 70.0_f / 180.0_f * M_PI_f);
+
 	for (int i = 0; i < num_samples; i++)
 	{
+		// print iter
 		std::cout << i << std::endl;
-		int num_pixels = width * height;
-		const IntC pixel_index = arange<IntC>(num_pixels);
-		const IntC y = pixel_index / width;
-		const IntC x = pixel_index % width;
-		const Int2C pixel(x, y);
-		const ThinlensCamera thinlens(Real3(0.0_f, 3.03_f, 5.0_f), Real3(0.0_f, 0.03_f, 0.0_f), Real3(0.0_f, 1.0_f, 0.0_f), 0.00_f, 1.0_f, 70.0_f / 180.0_f * M_PI_f);
+
+		// init per iteration path contrib and active path
 		SpectrumC contrib = full<SpectrumC>(1.0_f, num_pixels);
+		BoolC active = true;
+
+		// sample origin and direction from thinlens
 		Real3C origin = thinlens.sample_pos(Real2C(rng.next_float32(), rng.next_float32()));
 		Real3C direction = thinlens.sample_dir(pixel, origin, Int2(width, height), Real2C(rng.next_float32(), rng.next_float32()));
-		BoolC active = true;
+
+		// for all bounces
 		for (int j = 0; j < num_bounces; j++)
 		{
-			Ray3C rays(origin, direction);
+			// make ray
+			const Ray3C rays(origin, direction);
+
+			// intersection test
 			auto [hit_info, is_intersect] = optix_backend.intersect(rays, active);
-			if (j != 0)
-			{
-				film += select(!is_intersect && active, contrib, full<SpectrumC>(0.0_f, num_pixels));
-			}
-			active = active && is_intersect;
+
+			// check if hit lightsource
+			film += select(!is_intersect && active, contrib, full<SpectrumC>(0.0_f, num_pixels));
+
+			// check which path still active
+			active &= is_intersect;
 
 			// create coord frame
-			const Frame3C coord_frame(hit_info.m_geometry_normal);
-
+			const Real2C scatter_sample = Real2C(rng.next_float32(), rng.next_float32());
+			const Frame3C coord_frame(hit_info.m_shading_normal);
+#if 1
 			// fetch bsdf
 			const IntC mat_index = gather<IntC>(material_id, hit_info.m_tri_id, active);
 			const CUDAArray<Bsdf *> bsdf = gather<CUDAArray<Bsdf *>>(materials, mat_index, active);
 
 			// sample outgoing direction
-			const Real2C second_sample = Real2C(rng.next_float32(), rng.next_float32());
 			const Real3C incoming_local = coord_frame.to_local(-direction, active);
-			auto [bsdf_contrib, outgoing_local] = bsdf->sample(incoming_local, hit_info.m_position, second_sample, active);
+			auto [bsdf_contrib, outgoing_local] = bsdf->sample(incoming_local, hit_info.m_position, scatter_sample, active);
 			const Real3C outgoing = coord_frame.to_world(outgoing_local, active);
+#else
+			const Real3C outgoing_local = cosine_weighted_hemisphere_from_square(scatter_sample);
+			const Real3C outgoing = coord_frame.to_world(outgoing_local, active);
+			const SpectrumC bsdf_contrib = 0.5_f;
+#endif
 
 			// update variables for next bounce
 			contrib *= bsdf_contrib;
@@ -248,6 +330,7 @@ int main()
 		}
 	}
 
+	// normalize the film by number of samples
 	film /= Real(num_samples);
 
 	std::cout << sw.timeMilliSec() << std::endl;
