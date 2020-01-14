@@ -184,8 +184,12 @@ bool read_source_file(std::string & str,
 struct OptixBackend
 {
 	OptixBackend():
-		m_per_face_positions_triplets_aos(empty<IntC>()),
-		m_positions_aos(empty<RealC>())
+		m_positions_triplets_aos(empty<IntC>()),
+		m_positions_aos(empty<RealC>()),
+		m_texcoords_soa(empty<Real2C>()),
+		m_texcoord_triplets_soa(empty<Int3C>()),
+		m_shading_normals_soa(empty<Real3C>()),
+		m_shading_normal_triplets_soa(empty<Real3C>())
 	{
 		optixInit();
 		OptixDeviceContextOptions optix_options = {};
@@ -306,7 +310,7 @@ struct OptixBackend
 							std::vector<float2> texcoords_host)
 	{
 		// copy traingles and vertices to GPU
-		m_per_face_positions_triplets_aos = IntC::copy(position_triplets.data(), 3 * position_triplets.size());
+		m_positions_triplets_aos = IntC::copy(position_triplets.data(), 3 * position_triplets.size());
 		m_positions_aos = RealC::copy(positions_host.data(), 3 * positions_host.size());
 
 		{
@@ -332,7 +336,7 @@ struct OptixBackend
 		cuda_eval();
 
 		const unsigned int num_meshes = 1;
-		CUdeviceptr cu_traingles_aos = reinterpret_cast<CUdeviceptr>(m_per_face_positions_triplets_aos.data());
+		CUdeviceptr cu_traingles_aos = reinterpret_cast<CUdeviceptr>(m_positions_triplets_aos.data());
 		CUdeviceptr cu_vertices_aos = reinterpret_cast<CUdeviceptr>(m_positions_aos.data());
 
 		// specify options for the build
@@ -394,16 +398,16 @@ struct OptixBackend
 	}
 
 	Int3C get_position_triplet(const IntC & indices,
-							   const BoolC & mask = true)
+							   const BoolC & mask = true) const
 	{
-		const IntC t0 = gather<IntC>(m_per_face_positions_triplets_aos, indices * 3 + 0, mask);
-		const IntC t1 = gather<IntC>(m_per_face_positions_triplets_aos, indices * 3 + 1, mask);
-		const IntC t2 = gather<IntC>(m_per_face_positions_triplets_aos, indices * 3 + 2, mask);
+		const IntC t0 = gather<IntC>(m_positions_triplets_aos, indices * 3 + 0, mask);
+		const IntC t1 = gather<IntC>(m_positions_triplets_aos, indices * 3 + 1, mask);
+		const IntC t2 = gather<IntC>(m_positions_triplets_aos, indices * 3 + 2, mask);
 		return Int3C(t0, t1, t2);
 	}
 
 	Real3C get_position(const IntC & indices,
-						const BoolC & mask = true)
+						const BoolC & mask = true) const
 	{
 		const RealC px = gather<RealC>(m_positions_aos, indices * 3 + 0, mask);
 		const RealC py = gather<RealC>(m_positions_aos, indices * 3 + 1, mask);
@@ -413,7 +417,7 @@ struct OptixBackend
 
 	Real2C get_interpolated_texcoord(const Int3C & indices,
 									 const Real2C & barycentric_coords,
-									 const BoolC & mask = true)
+									 const BoolC & mask = true) const
 	{
 		const Real2C t0 = gather<Real2C>(m_texcoords_soa, indices.x(), mask);
 		const Real2C t1 = gather<Real2C>(m_texcoords_soa, indices.y(), mask);
@@ -423,7 +427,7 @@ struct OptixBackend
 
 	Real3C get_interpolated_shading_normal(const Int3C & indices,
 										   const Real2C & barycentric_coords,
-										   const BoolC & mask = true)
+										   const BoolC & mask = true) const
 	{
 		const Real3C s0 = gather<Real3C>(m_shading_normals_soa, indices.x(), mask);
 		const Real3C s1 = gather<Real3C>(m_shading_normals_soa, indices.y(), mask);
@@ -433,7 +437,7 @@ struct OptixBackend
 	}
 
 	std::tuple<TriangleHitInfoC, BoolC> intersect(const Ray3C & rays,
-												  const BoolC & mask = true)
+												  const BoolC & mask = true) const
 	{
 		const size_t num_rays = rays.m_origin.x().size();
 
@@ -507,7 +511,7 @@ struct OptixBackend
 	Int3C					m_shading_normal_triplets_soa;
 
 	// these two needed to be Array Of Structure(AoS) since it is shared with optix
-	IntC					m_per_face_positions_triplets_aos;
+	IntC					m_positions_triplets_aos;
 	RealC					m_positions_aos;
 
 	CUdeviceptr				m_optix_raygen_record, m_optix_miss_record, m_optix_hitgroup_record;
