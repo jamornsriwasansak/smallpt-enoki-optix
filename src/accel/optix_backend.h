@@ -145,16 +145,6 @@ Array_ soa_from_aos(const value_t<Array_> & array_aos, const BoolC & mask = true
 	return result;
 }
 
-Int3C soa_from_aos_x(const IntC & array_aos, const BoolC & mask = true)
-{
-	Int3C result = empty<Int3C>();
-	IntC indices = arange<IntC>(0, array_aos.size(), 3);
-	result.x() = gather<IntC>(array_aos, indices + 0, mask);
-	//result.y() = gather<IntC>(array_aos, indices + 1, mask);
-	//result.z() = gather<IntC>(array_aos, indices + 2, mask);
-	return result;
-}
-
 bool read_source_file(std::string & str,
 					  const std::string & filename)
 {
@@ -171,32 +161,10 @@ bool read_source_file(std::string & str,
 	return false;
 }
 
-#define CUDA_NVRTC_OPTIONS  \
-  "-arch", \
-  "compute_30", \
-  "-use_fast_math", \
-  "-lineinfo", \
-  "-default-device", \
-  "-rdc", \
-  "true", \
-  "-D__x86_64",
-
 struct OptixBackend
 {
-	OptixBackend():
-		m_positions_triplets_aos(empty<IntC>()),
-		m_positions_aos(empty<RealC>()),
-		m_texcoords_soa(empty<Real2C>()),
-		m_texcoord_triplets_soa(empty<Int3C>()),
-		m_shading_normals_soa(empty<Real3C>()),
-		m_shading_normal_triplets_soa(empty<Real3C>())
+	OptixBackend()
 	{
-		optixInit();
-		OptixDeviceContextOptions optix_options = {};
-		CUcontext cu_context = 0;
-		optixDeviceContextCreate(cu_context, &optix_options, &m_optix_context);
-		setup_shaders_and_program();
-		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_param), sizeof(Params)));
 	}
 
 	~OptixBackend()
@@ -205,6 +173,16 @@ struct OptixBackend
 		cudaFree(reinterpret_cast<void *>(m_optix_miss_record));
 		cudaFree(reinterpret_cast<void *>(m_optix_hitgroup_record));
 		cudaFree(reinterpret_cast<void *>(m_optix_compacted_gas_buffer));
+	}
+
+	void init()
+	{
+		optixInit();
+		OptixDeviceContextOptions optix_options = {};
+		CUcontext cu_context = 0;
+		optixDeviceContextCreate(cu_context, &optix_options, &m_optix_context);
+		setup_shaders_and_program();
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&m_d_param), sizeof(Params)));
 	}
 
 	void setup_shaders_and_program()
@@ -302,42 +280,30 @@ struct OptixBackend
 		m_optix_sbt.hitgroupRecordCount = 1;
 	}
 
-	void set_triangles_soup(std::vector<int3> position_triplets,
-							std::vector<float3> positions_host,
-							std::vector<int3> shading_normal_triplets,
-							std::vector<float3> shading_normals_host,
-							std::vector<int3> per_face_texcoord_indices_host,
-							std::vector<float2> texcoords_host)
+	void set_triangles_soup(IntC * position_triplets,
+							RealC * positions,
+							IntC * shading_normal_triplets,
+							RealC * shading_normals,
+							IntC * texcoord_triplets,
+							RealC * texcoords)
 	{
 		// copy traingles and vertices to GPU
-		m_positions_triplets_aos = IntC::copy(position_triplets.data(), 3 * position_triplets.size());
-		m_positions_aos = RealC::copy(positions_host.data(), 3 * positions_host.size());
+		m_position_triplets_aos = position_triplets;
+		m_positions_aos = positions;
 
-		{
-			const IntC shading_normal_triplets_aos = IntC::copy(shading_normal_triplets.data(), 3 * shading_normal_triplets.size());
-			m_shading_normal_triplets_soa = soa_from_aos<Real3C>(shading_normal_triplets_aos);
-		}
+		// copy shading normal CPU -> GPU
+		m_shading_normal_triplets_aos = shading_normal_triplets;
+		m_shading_normals_aos = shading_normals;
 
-		{
-			const RealC shading_normals_aos = RealC::copy(shading_normals_host.data(), 3 * shading_normals_host.size());
-			m_shading_normals_soa = soa_from_aos<Real3C>(shading_normals_aos);
-		}
-
-		{
-			const IntC texcoord_triplets_aos = IntC::copy(per_face_texcoord_indices_host.data(), 3 * per_face_texcoord_indices_host.size());
-			m_texcoord_triplets_soa = soa_from_aos<Int3C>(texcoord_triplets_aos);
-		}
-
-		{
-			const RealC texcoords_aos = RealC::copy(texcoords_host.data(), 2 * texcoords_host.size());
-			m_texcoords_soa = soa_from_aos<Real2C>(texcoords_aos);
-		}
+		// copy texcoords CPU -> GPU
+		m_texcoord_triplets_aos = texcoord_triplets;
+		m_texcoords_aos = texcoords;
 
 		cuda_eval();
 
 		const unsigned int num_meshes = 1;
-		CUdeviceptr cu_traingles_aos = reinterpret_cast<CUdeviceptr>(m_positions_triplets_aos.data());
-		CUdeviceptr cu_vertices_aos = reinterpret_cast<CUdeviceptr>(m_positions_aos.data());
+		CUdeviceptr cu_traingles_aos = reinterpret_cast<CUdeviceptr>(m_position_triplets_aos->data());
+		CUdeviceptr cu_vertices_aos = reinterpret_cast<CUdeviceptr>(m_positions_aos->data());
 
 		// specify options for the build
 		OptixAccelBuildOptions accel_options = {};
@@ -349,10 +315,10 @@ struct OptixBackend
 		OptixBuildInput triangle_input = {};
 		triangle_input.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
 		triangle_input.triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
-		triangle_input.triangleArray.numVertices = (unsigned int)(positions_host.size());
+		triangle_input.triangleArray.numVertices = (unsigned int)(m_positions_aos->size() / 3);
 		triangle_input.triangleArray.vertexBuffers = &cu_vertices_aos;
 		triangle_input.triangleArray.indexFormat = OPTIX_INDICES_FORMAT_UNSIGNED_INT3;
-		triangle_input.triangleArray.numIndexTriplets = (unsigned int)(position_triplets.size());
+		triangle_input.triangleArray.numIndexTriplets = (unsigned int)(m_position_triplets_aos->size() / 3);
 		triangle_input.triangleArray.indexBuffer = cu_traingles_aos;
 		triangle_input.triangleArray.flags = triangle_input_flags;
 		triangle_input.triangleArray.numSbtRecords = 1;
@@ -397,42 +363,59 @@ struct OptixBackend
 		CUDA_CHECK(cudaFree(reinterpret_cast<void *>(output_buffer)));
 	}
 
-	Int3C get_position_triplet(const IntC & indices,
-							   const BoolC & mask = true) const
+	Int3C get_triplet(const IntC & triplets,
+					  const IntC & indices,
+					  const BoolC & mask = true) const
 	{
-		const IntC t0 = gather<IntC>(m_positions_triplets_aos, indices * 3 + 0, mask);
-		const IntC t1 = gather<IntC>(m_positions_triplets_aos, indices * 3 + 1, mask);
-		const IntC t2 = gather<IntC>(m_positions_triplets_aos, indices * 3 + 2, mask);
+		const IntC t0 = gather<IntC>(triplets, indices * 3 + 0, mask);
+		const IntC t1 = gather<IntC>(triplets, indices * 3 + 1, mask);
+		const IntC t2 = gather<IntC>(triplets, indices * 3 + 2, mask);
 		return Int3C(t0, t1, t2);
 	}
 
 	Real3C get_position(const IntC & indices,
 						const BoolC & mask = true) const
 	{
-		const RealC px = gather<RealC>(m_positions_aos, indices * 3 + 0, mask);
-		const RealC py = gather<RealC>(m_positions_aos, indices * 3 + 1, mask);
-		const RealC pz = gather<RealC>(m_positions_aos, indices * 3 + 2, mask);
+		const RealC px = gather<RealC>(*m_positions_aos, indices * 3 + 0, mask);
+		const RealC py = gather<RealC>(*m_positions_aos, indices * 3 + 1, mask);
+		const RealC pz = gather<RealC>(*m_positions_aos, indices * 3 + 2, mask);
 		return Real3C(px, py, pz);
+	}
+
+	Real2C get_texcoord(const IntC & indices,
+						const BoolC & mask = true) const
+	{
+		const RealC tx = gather<RealC>(*m_texcoords_aos, indices * 2 + 0, mask);
+		const RealC ty = gather<RealC>(*m_texcoords_aos, indices * 2 + 1, mask);
+		return Real2C(tx, ty);
 	}
 
 	Real2C get_interpolated_texcoord(const Int3C & indices,
 									 const Real2C & barycentric_coords,
 									 const BoolC & mask = true) const
 	{
-		const Real2C t0 = gather<Real2C>(m_texcoords_soa, indices.x(), mask);
-		const Real2C t1 = gather<Real2C>(m_texcoords_soa, indices.y(), mask);
-		const Real2C t2 = gather<Real2C>(m_texcoords_soa, indices.z(), mask);
+		const Real2C t0 = get_texcoord(indices.x(), mask);
+		const Real2C t1 = get_texcoord(indices.y(), mask);
+		const Real2C t2 = get_texcoord(indices.z(), mask);
 		return barycentric_interpolate(t0, t1, t2, barycentric_coords);
+	}
+
+	Real3C get_shading_normal(const IntC & indices,
+							  const BoolC & mask = true) const
+	{
+		const RealC px = gather<RealC>(*m_shading_normals_aos, indices * 3 + 0, mask);
+		const RealC py = gather<RealC>(*m_shading_normals_aos, indices * 3 + 1, mask);
+		const RealC pz = gather<RealC>(*m_shading_normals_aos, indices * 3 + 2, mask);
+		return Real3C(px, py, pz);
 	}
 
 	Real3C get_interpolated_shading_normal(const Int3C & indices,
 										   const Real2C & barycentric_coords,
 										   const BoolC & mask = true) const
 	{
-		const Real3C s0 = gather<Real3C>(m_shading_normals_soa, indices.x(), mask);
-		const Real3C s1 = gather<Real3C>(m_shading_normals_soa, indices.y(), mask);
-		const Real3C s2 = gather<Real3C>(m_shading_normals_soa, indices.z(), mask);
-
+		const Real3C s0 = get_shading_normal(indices.x(), mask);
+		const Real3C s1 = get_shading_normal(indices.y(), mask);
+		const Real3C s2 = get_shading_normal(indices.z(), mask);
 		return barycentric_interpolate(s0, s1, s2, barycentric_coords);
 	}
 
@@ -470,11 +453,11 @@ struct OptixBackend
 		param.m_result_barycentric_v = barycentric_v.data();
 
 		// update param
-		cudaMemcpy(reinterpret_cast<void *>(d_param), &param, sizeof(Params), cudaMemcpyHostToDevice);
+		cudaMemcpy(reinterpret_cast<void *>(m_d_param), &param, sizeof(Params), cudaMemcpyHostToDevice);
 
 		// launch optix
 		const Uint sizeof_Params = sizeof(Params);
-		optixLaunch(m_optix_pipeline, 0, d_param, sizeof_Params, &m_optix_sbt, Uint(num_rays), 1,  1); 
+		optixLaunch(m_optix_pipeline, 0, m_d_param, sizeof_Params, &m_optix_sbt, Uint(num_rays), 1,  1); 
 
 		// active mask
 		const BoolC active = neq(tri_id, -1) && mask;
@@ -486,33 +469,31 @@ struct OptixBackend
 		const Real3C p = rays.m_origin + t * rays.m_dir;
 
 		// geometry normal
-		const Int3C position_triplet = get_position_triplet(tri_id, active);
+		const Int3C position_triplet = get_triplet(*m_position_triplets_aos, tri_id, active);
 		const Real3C p0 = get_position(position_triplet.x(), active);
 		const Real3C p1 = get_position(position_triplet.y(), active);
 		const Real3C p2 = get_position(position_triplet.z(), active);
 		const Real3C geometry_normal = compute_geometry_normal(p0, p1, p2);
 
 		// texcoord
-		const Int3C texcoord_triplet = gather<Int3C>(m_texcoord_triplets_soa, tri_id, active);
+		const Int3C texcoord_triplet = get_triplet(*m_texcoord_triplets_aos, tri_id, active);
 		const Real2C texcoord = get_interpolated_texcoord(texcoord_triplet, barycentric, active);
 		
 		// shading normal
-		const Int3C shading_normal_triplet = gather<Int3C>(m_shading_normal_triplets_soa, tri_id, active);
+		const Int3C shading_normal_triplet = get_triplet(*m_shading_normal_triplets_aos, tri_id, active);
 		const Real3C shading_normal = get_interpolated_shading_normal(shading_normal_triplet, barycentric, active);
 
 		return std::make_tuple(TriangleHitInfoC(tri_id, t, barycentric, p, geometry_normal, shading_normal, texcoord), active);
 	}
 
-	CUdeviceptr				d_param;
+	CUdeviceptr				m_d_param;
 
-	Real2C					m_texcoords_soa;
-	Int3C					m_texcoord_triplets_soa;
-	Real3C					m_shading_normals_soa;
-	Int3C					m_shading_normal_triplets_soa;
-
-	// these two needed to be Array Of Structure(AoS) since it is shared with optix
-	IntC					m_positions_triplets_aos;
-	RealC					m_positions_aos;
+	IntC *					m_position_triplets_aos;
+	RealC *					m_positions_aos;
+	RealC *					m_texcoords_aos;
+	IntC *					m_texcoord_triplets_aos;
+	RealC *					m_shading_normals_aos;
+	IntC *					m_shading_normal_triplets_aos;
 
 	CUdeviceptr				m_optix_raygen_record, m_optix_miss_record, m_optix_hitgroup_record;
 	CUdeviceptr				m_optix_compacted_gas_buffer;

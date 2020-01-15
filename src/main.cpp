@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 #define NOMINMAX
 #include <iostream>
 #include <string>
@@ -81,7 +82,6 @@ struct ImageTexture : public Texture
 struct Bsdf
 {
 	virtual std::tuple<SpectrumC, Real3C> sample(const Real3C & incoming,
-												 const Real3C & texture_coord,
 												 const Real2C & sample,
 												 const BoolC & mask = true) const = 0;
 };
@@ -93,21 +93,20 @@ ENOKI_CALL_SUPPORT_END(Bsdf)
 struct LambertBsdf : public Bsdf
 {
 	LambertBsdf(const Spectrum & reflectance):
-		m_reflectance(std::make_shared<ImageTexture>(reflectance))
+		m_reflectance(reflectance)
 	{
 	}
 
 	std::tuple<SpectrumC, Real3C> sample(const Real3C & incoming,
-										 const Real3C & texture_coord,
 										 const Real2C & sample,
 										 const BoolC & mask = true) const override
 	{
-		SpectrumC outgoing = cosine_weighted_hemisphere_from_square(sample);
-		SpectrumC contrib = m_reflectance->eval(texture_coord, mask);
+		const SpectrumC outgoing = cosine_weighted_hemisphere_from_square(sample);
+		const SpectrumC contrib = m_reflectance;
 		return std::make_tuple(contrib, outgoing);
 	}
 
-	std::shared_ptr<ImageTexture> m_reflectance;
+	Spectrum m_reflectance;
 };
 
 template <typename T>
@@ -129,14 +128,14 @@ std::tuple<
 	std::vector<int3>, /* per face texcoord indices */
 	std::vector<float2>, /* texcoord */
 	std::vector<int>, /* per triangle material id */
-	std::vector<std::shared_ptr<LambertBsdf>>> load_meshes(const std::string & path)
+	std::vector<std::shared_ptr<LambertBsdf>>> load_meshes(const std::filesystem::path & path)
 {
 	// load mesh
 	tinyobj::ObjReader obj_reader;
 	tinyobj::ObjReaderConfig obj_reader_config;
 	obj_reader_config.triangulate = true;
 	obj_reader_config.vertex_color = false;
-	bool ret = obj_reader.ParseFromFile(path, obj_reader_config);
+	bool ret = obj_reader.ParseFromFile(path.string(), obj_reader_config);
 
 	// compute num_all_triangles
 	const size_t num_shapes = obj_reader.GetShapes().size();
@@ -148,9 +147,9 @@ std::tuple<
 	}
 
 	// get triangles and material_id
-	std::vector<int3> per_face_position_indices(num_all_triangles);
-	std::vector<int3> per_face_shading_normal_indices(num_all_triangles);
-	std::vector<int3> per_face_texcoord_indices(num_all_triangles);
+	std::vector<int3> position_triplets(num_all_triangles);
+	std::vector<int3> shading_normal_triplets(num_all_triangles);
+	std::vector<int3> texcoord_triplets(num_all_triangles);
 	std::vector<int> per_face_material_id(num_all_triangles);
 	const std::vector<tinyobj::material_t> & tiny_mat = obj_reader.GetMaterials();
 	size_t i_face_offset = 0;
@@ -160,17 +159,17 @@ std::tuple<
 		const size_t num_triangles = tiny_shape.mesh.num_face_vertices.size();
 		for (size_t i_face = 0; i_face < num_triangles; i_face++)
 		{
-			per_face_position_indices[i_face + i_face_offset].x = tiny_shape.mesh.indices[i_face * 3 + 0].vertex_index;
-			per_face_position_indices[i_face + i_face_offset].y = tiny_shape.mesh.indices[i_face * 3 + 1].vertex_index;
-			per_face_position_indices[i_face + i_face_offset].z = tiny_shape.mesh.indices[i_face * 3 + 2].vertex_index;
+			position_triplets[i_face + i_face_offset].x = tiny_shape.mesh.indices[i_face * 3 + 0].vertex_index;
+			position_triplets[i_face + i_face_offset].y = tiny_shape.mesh.indices[i_face * 3 + 1].vertex_index;
+			position_triplets[i_face + i_face_offset].z = tiny_shape.mesh.indices[i_face * 3 + 2].vertex_index;
 
-			per_face_shading_normal_indices[i_face + i_face_offset].x = tiny_shape.mesh.indices[i_face * 3 + 0].normal_index;
-			per_face_shading_normal_indices[i_face + i_face_offset].y = tiny_shape.mesh.indices[i_face * 3 + 1].normal_index;
-			per_face_shading_normal_indices[i_face + i_face_offset].z = tiny_shape.mesh.indices[i_face * 3 + 2].normal_index;
+			shading_normal_triplets[i_face + i_face_offset].x = tiny_shape.mesh.indices[i_face * 3 + 0].normal_index;
+			shading_normal_triplets[i_face + i_face_offset].y = tiny_shape.mesh.indices[i_face * 3 + 1].normal_index;
+			shading_normal_triplets[i_face + i_face_offset].z = tiny_shape.mesh.indices[i_face * 3 + 2].normal_index;
 
-			per_face_texcoord_indices[i_face + i_face_offset].x = tiny_shape.mesh.indices[i_face * 3 + 0].texcoord_index;
-			per_face_texcoord_indices[i_face + i_face_offset].y = tiny_shape.mesh.indices[i_face * 3 + 1].texcoord_index;
-			per_face_texcoord_indices[i_face + i_face_offset].z = tiny_shape.mesh.indices[i_face * 3 + 2].texcoord_index;
+			texcoord_triplets[i_face + i_face_offset].x = tiny_shape.mesh.indices[i_face * 3 + 0].texcoord_index;
+			texcoord_triplets[i_face + i_face_offset].y = tiny_shape.mesh.indices[i_face * 3 + 1].texcoord_index;
+			texcoord_triplets[i_face + i_face_offset].z = tiny_shape.mesh.indices[i_face * 3 + 2].texcoord_index;
 
 			// copy per triangle material id
 			per_face_material_id[i_face + i_face_offset] = tiny_shape.mesh.material_ids[i_face] + 1;
@@ -231,11 +230,59 @@ std::tuple<
 		materials[i_material + 1] = std::make_shared<LambertBsdf>(Spectrum(r, g, b));
 	}
 
-	return std::make_tuple(per_face_position_indices, positions,
-						   per_face_shading_normal_indices, shading_normals,
-						   per_face_texcoord_indices, texcoords,
+	return std::make_tuple(position_triplets, positions,
+						   shading_normal_triplets, shading_normals,
+						   texcoord_triplets, texcoords,
 						   per_face_material_id, materials);
 }
+
+#include "enoki_entry.h"
+
+struct Scene
+{
+	void add_triangle_mesh(const std::filesystem::path & obj_filepath)
+	{
+		auto [position_triplets_host, positions_host,
+			shading_normal_triplets_host, shading_normals_host,
+			texcoord_triplets_host, texcoords_host,
+			per_face_material_id, materials_host] = load_meshes(obj_filepath);
+
+		// copy position CPU -> GPU
+		m_position_triplets = IntC::copy(position_triplets_host.data(), 3 * position_triplets_host.size());
+		m_positions = RealC::copy(positions_host.data(), 3 * positions_host.size());
+
+		// copy shading normal CPU -> GPU
+		m_shading_normal_triplets = IntC::copy(shading_normal_triplets_host.data(), 3 * shading_normal_triplets_host.size());
+		m_shading_normals = RealC::copy(shading_normals_host.data(), 3 * shading_normals_host.size());
+
+		// copy texcoords CPU -> GPU
+		m_texcoord_triplets = IntC::copy(texcoord_triplets_host.data(), 3 * texcoord_triplets_host.size());
+		m_texcoords = RealC::copy(texcoords_host.data(), 2 * texcoords_host.size());
+
+		m_materials = std::vector<std::shared_ptr<Bsdf>>(materials_host.begin(), materials_host.end());
+		m_material_id = IntC::copy(per_face_material_id.data(), per_face_material_id.size());
+		m_d_materials = CUDAArray<Bsdf *>::copy(raw_ptrs(m_materials).data(), m_materials.size());
+	}
+
+	void commit()
+	{
+		m_optix_backend.init();
+		m_optix_backend.set_triangles_soup(&m_position_triplets, &m_positions,
+										 &m_shading_normal_triplets, &m_shading_normals,
+										 &m_texcoord_triplets, &m_texcoords);
+	}
+
+	IntC								m_position_triplets;
+	RealC								m_positions;
+	RealC								m_shading_normals;
+	IntC								m_shading_normal_triplets;
+	RealC								m_texcoords;
+	IntC								m_texcoord_triplets;
+	IntC								m_material_id;
+	CUDAArray<Bsdf *>					m_d_materials;
+	std::vector<std::shared_ptr<Bsdf>>	m_materials;
+	OptixBackend						m_optix_backend;
+};
 
 int main()
 {
@@ -243,22 +290,13 @@ int main()
 	const int width = 1920;
 	const int height = 1080;
 	const int num_pixels = width * height;
-	const int num_samples = 50;
-	const int num_bounces = 3;
+	const int num_samples = 100;
+	const int num_bounces = 5;
 
 	// load meshes and materials
-	auto [per_face_position_indices, positions,
-		per_face_shading_normal_indices, shading_normals,
-		per_face_texcoord_indices, texcoords,
-		per_face_material_id, materials_host] = load_meshes("mitsuba.obj");
-	IntC material_id = IntC::copy(per_face_material_id.data(), per_face_material_id.size());
-	CUDAArray<LambertBsdf *> materials = CUDAArray<LambertBsdf *>::copy(raw_ptrs(materials_host).data(), materials_host.size());
-
-	// setup optix back end
-	OptixBackend optix_backend;
-	optix_backend.set_triangles_soup(per_face_position_indices, positions,
-									 per_face_shading_normal_indices, shading_normals,
-									 per_face_texcoord_indices, texcoords);
+	Scene scene;
+	scene.add_triangle_mesh("mitsuba.obj");
+	scene.commit();
 
 	// init film
 	SpectrumC film = zero<SpectrumC>(width * height);
@@ -297,7 +335,7 @@ int main()
 			const Ray3C rays(origin, direction);
 
 			// intersection test
-			auto [hit_info, is_intersect] = optix_backend.intersect(rays, active);
+			auto [hit_info, is_intersect] = scene.m_optix_backend.intersect(rays, active);
 
 			// check if hit lightsource
 			film += select(!is_intersect && active, contrib, full<SpectrumC>(0.0_f, num_pixels));
@@ -308,20 +346,15 @@ int main()
 			// create coord frame
 			const Real2C scatter_sample = Real2C(rng.next_float32(), rng.next_float32());
 			const Frame3C coord_frame(hit_info.m_shading_normal);
-#if 1
+
 			// fetch bsdf
-			const IntC mat_index = gather<IntC>(material_id, hit_info.m_tri_id, active);
-			const CUDAArray<Bsdf *> bsdf = gather<CUDAArray<Bsdf *>>(materials, mat_index, active);
+			const IntC mat_index = gather<IntC>(scene.m_material_id, hit_info.m_tri_id, active);
+			const CUDAArray<Bsdf *> bsdf = gather<CUDAArray<Bsdf *>>(scene.m_d_materials, mat_index, active);
 
 			// sample outgoing direction
 			const Real3C incoming_local = coord_frame.to_local(-direction, active);
-			auto [bsdf_contrib, outgoing_local] = bsdf->sample(incoming_local, hit_info.m_position, scatter_sample, active);
+			auto [bsdf_contrib, outgoing_local] = bsdf->sample(incoming_local, scatter_sample, active);
 			const Real3C outgoing = coord_frame.to_world(outgoing_local, active);
-#else
-			const Real3C outgoing_local = cosine_weighted_hemisphere_from_square(scatter_sample);
-			const Real3C outgoing = coord_frame.to_world(outgoing_local, active);
-			const SpectrumC bsdf_contrib = 0.5_f;
-#endif
 
 			// update variables for next bounce
 			contrib *= bsdf_contrib;

@@ -35,7 +35,7 @@
 
 extern "C"
 {
-    __constant__ Params params;
+	__constant__ Params params;
 }
 
 
@@ -48,13 +48,13 @@ extern "C"
 extern "C" __global__
 void __closesthit__ch()
 {
-    const float2 uv = optixGetTriangleBarycentrics();
-    const float t = optixGetRayTmax();
-    const unsigned int id = optixGetPrimitiveIndex();
-    optixSetPayload_0(id);
-    optixSetPayload_1(float_as_int(t));
-    optixSetPayload_2(float_as_int(uv.x));
-    optixSetPayload_3(float_as_int(uv.y));
+	const float2 uv = optixGetTriangleBarycentrics();
+	const float t = optixGetRayTmax();
+	const unsigned int id = optixGetPrimitiveIndex();
+	optixSetPayload_0(id);
+	optixSetPayload_1(float_as_int(t));
+	optixSetPayload_2(float_as_int(uv.x));
+	optixSetPayload_3(float_as_int(uv.y));
 }
 
 
@@ -67,7 +67,7 @@ void __closesthit__ch()
 extern "C" __global__
 void __miss__ms()
 {
-    optixSetPayload_0(unsigned int(-1));
+	optixSetPayload_0(unsigned int(-1));
 }
 
 
@@ -80,12 +80,12 @@ void __miss__ms()
 extern "C" __global__
 void __raygen__rg()
 {
-    const uint3 idx = optixGetLaunchIndex();
-    const uint3 dim = optixGetLaunchDimensions();
-    const uint32_t linear_idx = idx.z * dim.y * dim.x + idx.y * dim.x + idx.x;
-    bool ray_mask = (params.m_ray_mask_size == 1) ? params.m_ray_mask[0] : params.m_ray_mask[linear_idx];
-    if (ray_mask)
-    {
+	const uint3 idx = optixGetLaunchIndex();
+	const uint3 dim = optixGetLaunchDimensions();
+	const uint32_t linear_idx = idx.z * dim.y * dim.x + idx.y * dim.x + idx.x;
+	bool ray_mask = (params.m_ray_mask_size == 1) ? params.m_ray_mask[0] : params.m_ray_mask[linear_idx];
+	if (ray_mask)
+	{
 		float3 origin;
 		origin.x = params.m_ray_origin_x[linear_idx];
 		origin.y = params.m_ray_origin_y[linear_idx];
@@ -99,14 +99,14 @@ void __raygen__rg()
 		float tmin = params.m_ray_tmin[linear_idx];
 		float tmax = params.m_ray_tmax[linear_idx];
 
-        uint32_t id, t, u, v;
-        optixTrace(params.m_optix_handle, origin, direction, tmin, tmax, 0.0f, OptixVisibilityMask(1),
-                   params.m_do_closest ? OPTIX_RAY_FLAG_NONE : OPTIX_RAY_FLAG_DISABLE_ANYHIT |
-                   OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT | OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT, 0, 0, 0, id, t, u, v);
+		uint32_t id, t, u, v;
+		optixTrace(params.m_optix_handle, origin, direction, tmin, tmax, 0.0f, OptixVisibilityMask(1),
+				   params.m_do_closest ? OPTIX_RAY_FLAG_NONE : OPTIX_RAY_FLAG_DISABLE_ANYHIT |
+				   OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT | OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT, 0, 0, 0, id, t, u, v);
 
-        params.m_result_t[linear_idx] = int_as_float(t);
-        params.m_result_tri_id[linear_idx] = id;
-        params.m_result_barycentric_u[linear_idx] = int_as_float(u);
-        params.m_result_barycentric_v[linear_idx] = int_as_float(v);
-    }
+		params.m_result_t[linear_idx] = int_as_float(t);
+		params.m_result_tri_id[linear_idx] = id;
+		params.m_result_barycentric_u[linear_idx] = int_as_float(u);
+		params.m_result_barycentric_v[linear_idx] = int_as_float(v);
+	}
 }
