@@ -146,22 +146,23 @@ struct SpecBsdf : public Bsdf
 	{
 	}
 
-	SpectrumC eval(const Real3C & in,
-				   const Real3C & out,
+	SpectrumC eval(const Real3C & v,
+				   const Real3C & l,
 				   const Real3C & texcoord,
 				   const BoolC & mask = true) const
 	{
-		const Real3C half = (in + out) / norm(in + out);
+		const Real3C h = normalize(v + l);
 
 		// compute F - fresnel reflection coefficient
 		const RealC eta = 1.0_f;
-		const SpectrumC value_F = schlick_approx(in.y(), eta, mask);
+		const SpectrumC f_term = schlick_approx(v.y(), eta, mask);
 
 		// compute G - geometric distribution / shadowing factor
 
+
 		// compute D - microfacet distribution term
 
-		return value_F;
+		return f_term;
 	}
 
 	std::tuple<SpectrumC, Real3C> sample(const Real3C & in,
@@ -181,65 +182,36 @@ struct DiffuseBsdf : public Bsdf
 	{
 	}
 
-	SpectrumC eval(const Real3C & in,
-				   const Real3C & out,
+	SpectrumC eval(const Real3C & v,
+				   const Real3C & l,
 				   const Real3C & texcoord,
 				   const BoolC & mask = true) const
 	{
-		// Brent Burley 2015 eq.4 
 		const SpectrumC base_color = 1.0_f;
 		const SpectrumC roughness = 1.0_f;
-		const Real3C half = norm(in + out);
-		const RealC cos_theta_d = half.y();
+
+		// Brent Burley 2015 eq.4 
+		const Real3C half = normalize(v + l);
+		const RealC cos_theta_d = dot(half, v);
 		const SpectrumC rr = 2.0_f * roughness * sqr(cos_theta_d);
-		const SpectrumC fv = schlick_weight(abs(in.y()));
-		const SpectrumC fl = schlick_weight(abs(out.y()));
+		const SpectrumC fv = schlick_weight(abs(v.y()));
+		const SpectrumC fl = schlick_weight(abs(l.y()));
 		const SpectrumC f_lambert = base_color * M_1_PI_f * (1.0_f - 0.5_f * fl) * (1.0_f - 0.5_f * fv);
 		const SpectrumC f_retro_reflect = base_color * M_1_PI_f * rr * (fl + fv + fl * fv * (rr - 1.0_f));
 		const SpectrumC f_d = f_lambert + f_retro_reflect;
 		return f_d;
 	}
 
-	std::tuple<SpectrumC, Real3C> sample(const Real3C & in,
+	std::tuple<SpectrumC, Real3C> sample(const Real3C & v,
 										 const Real3C & texcoord,
 										 const Real2C & sample,
 										 const BoolC & mask = true) const override
 	{
 		const Real3C outgoing = cosine_weighted_hemisphere_from_square(sample);
-		const SpectrumC contrib = eval(in, outgoing, texcoord, mask) * M_PI_f;
+		const SpectrumC contrib = eval(v, outgoing, texcoord, mask) * M_PI_f;
 		return std::make_tuple(contrib, outgoing);
 	}
 };
-
-/*
-struct ABsdf : public Bsdf
-{
-	SpectrumC eval_diffuse_fresnel(const SpectrumC & base_color,
-					const Real3C & roughness,
-					const RealC & cos_theta_d,
-					const RealC & cos_theta_l,
-					const RealC & cos_theta_v) const
-	{
-		const SpectrumC FD90 = 0.5_f + 2.0_f * roughness * sqr(cos_theta_d);
-		const SpectrumC t1 = 1.0_f + (FD90 - 1.0_f) * pow(1.0_f - cos_theta_l, 5);
-		const SpectrumC t2 = 1.0_f + (FD90 - 1.0_f) * pow(1.0_f - cos_theta_v, 5);
-		const SpectrumC fd = base_color * M_1_PI_f * t1 * t2;
-	}
-
-	SpectrumC eval(const Real3C & incoming,
-				   const Real3C & texcoord,
-				   const BoolC & mask = true) const
-	{
-	}
-
-	std::tuple<SpectrumC, Real3C> sample(const Real3C & incoming,
-										 const Real3C & texcoord,
-										 const Real2C & sample,
-										 const BoolC & mask = true) const override
-	{
-	}
-};
-*/
 
 template <typename T>
 std::vector<T *> raw_ptrs(const std::vector<std::shared_ptr<T>> & shared_ptrs)
@@ -351,8 +323,9 @@ std::tuple<
 	std::vector<std::shared_ptr<Bsdf>> materials(num_materials + 1);
 
 	// start with default material at 0
-	materials[0] = std::make_shared<LambertBsdf>(Spectrum(0.5_f));
+	//materials[0] = std::make_shared<LambertBsdf>(Spectrum(0.5_f));
 	//materials[0] = std::make_shared<DiffuseBsdf>(Spectrum(0.5_f));
+	materials[0] = std::make_shared<DiffuseBsdf>(Spectrum(1.0_f));
 
 	// push the rest of materials
 	for (size_t i_material = 0; i_material < num_materials; i_material++)
@@ -360,8 +333,9 @@ std::tuple<
 		const Real r = tiny_mat[i_material].diffuse[0];
 		const Real g = tiny_mat[i_material].diffuse[1];
 		const Real b = tiny_mat[i_material].diffuse[2];
-		materials[i_material + 1] = std::make_shared<LambertBsdf>(Spectrum(r, g, b));
+		//materials[i_material + 1] = std::make_shared<LambertBsdf>(Spectrum(r, g, b));
 		//materials[i_material + 1] = std::make_shared<DiffuseBsdf>(Spectrum(0.5_f));
+		materials[i_material + 1] = std::make_shared<DiffuseBsdf>(Spectrum(1.0_f));
 	}
 
 	return std::make_tuple(position_triplets, positions,
@@ -478,7 +452,7 @@ int main()
 	const int height = 512;
 	const int num_pixels = width * height;
 	const int num_samples = 100;
-	const int num_bounces = 5;
+	const int num_bounces = 2;
 
 	// load meshes and materials
 	Scene scene;
@@ -500,7 +474,7 @@ int main()
 	const IntC y = pixel_index / width;
 	const IntC x = pixel_index % width;
 	const Int2C pixel(x, y);
-	const ThinlensCamera thinlens(Real3(0.0_f, 3.03_f, 5.0_f), Real3(0.0_f, 0.03_f, 0.0_f), Real3(0.0_f, 1.0_f, 0.0_f), 0.00_f, 1.0_f, 70.0_f / 180.0_f * M_PI_f);
+	const ThinlensCamera thinlens(Real3(0.0_f, 3.03_f, 5.0_f), Real3(0.0_f, 0.03_f, 0.0_f), Real3(0.0_f, 1.0_f, 0.0_f), 0.00_f, 1.0_f, 40.0_f / 180.0_f * M_PI_f);
 
 	for (int i = 0; i < num_samples; i++)
 	{
@@ -559,7 +533,7 @@ int main()
 	cuda_fetch_element(film_host_b, film.z().index_(), 0, sizeof(int) * width * height);
 
 	std::cout << "writing image" << std::endl;
-	Fimage::save_pfm(film_host_r, film_host_g, film_host_b, width, height, "test.pfm");
+	Fimage::save_pfm(film_host_r, film_host_g, film_host_b, width, height, "wurst.pfm");
 
 	std::cout << "done" << std::endl;
 	return 0;
