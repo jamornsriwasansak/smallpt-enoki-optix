@@ -39,11 +39,11 @@ struct ThinlensCamera
 		// compute distance from film to camera
 		const Real distance_lens_to_film = m_film_size_y * 0.5_f / tan(m_fov_y * 0.5_f);
 		const Real ratio_x_to_y = Real(image_resolution.x()) / Real(image_resolution.y());
-		const Real2 half_film_size(ratio_x_to_y * m_film_size_y * 0.5_f, m_film_size_y * 0.5_f);
 
 		// sample position on the film
 		const Real2C ndc = (Real2C(pixel) + Real2C(sample.x(), sample.y())) / Real2(image_resolution);
-		const Real2C film_position_xy = (Real2(0.5_f) - ndc) * half_film_size;
+		const Real2 film_size(ratio_x_to_y * m_film_size_y, m_film_size_y);
+		const Real2C film_position_xy = (Real2(0.5_f) - ndc) * film_size;
 		const Real3C film_position(film_position_xy.x(), film_position_xy.y(), distance_lens_to_film);
 
 		// scale the film to focal distance
