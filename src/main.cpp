@@ -79,9 +79,16 @@ struct ImageTexture : public Texture
 	Int2 m_image_size;
 };
 
+struct Light
+{
+};
+
+using LightPtrC = CUDAArray<Light *>;
+
 struct Bsdf
 {
 	virtual std::tuple<SpectrumC, Real3C> sample(const Real3C & incoming,
+												 const Real3C & texture_coord,
 												 const Real2C & sample,
 												 const BoolC & mask = true) const = 0;
 };
@@ -90,24 +97,149 @@ ENOKI_CALL_SUPPORT_BEGIN(Bsdf)
 ENOKI_CALL_SUPPORT_METHOD(sample)
 ENOKI_CALL_SUPPORT_END(Bsdf)
 
+using BsdfPtrC = CUDAArray<Bsdf *>;
+
 struct LambertBsdf : public Bsdf
 {
 	LambertBsdf(const Spectrum & reflectance):
-		m_reflectance(reflectance)
+		m_reflectance(std::make_shared<ImageTexture>(reflectance))
 	{
 	}
 
 	std::tuple<SpectrumC, Real3C> sample(const Real3C & incoming,
+										 const Real3C & texcoord,
 										 const Real2C & sample,
 										 const BoolC & mask = true) const override
 	{
-		const SpectrumC outgoing = cosine_weighted_hemisphere_from_square(sample);
-		const SpectrumC contrib = m_reflectance;
+		const Real3C outgoing = cosine_weighted_hemisphere_from_square(sample);
+		const SpectrumC contrib = m_reflectance->eval(texcoord, mask);
 		return std::make_tuple(contrib, outgoing);
 	}
 
-	Spectrum m_reflectance;
+	std::shared_ptr<ImageTexture> m_reflectance;
 };
+
+RealC schlick_weight(const RealC & cos_theta)
+{
+	return pow(1.0_f - cos_theta, 5);
+}
+
+RealC schlick_approximation(const RealC & f0, const RealC & cos_theta)
+{
+	return lerp(schlick_weight(cos_theta), 1.0_f, f0);
+}
+
+SpectrumC schlick_approx(const RealC & cos_theta_i,
+						 const RealC & eta,
+						 const BoolC & mask = 0)
+{
+	const RealC f0 = sqr((1.0_f - eta) / (1.0_f + eta));
+	const RealC sqr_cos_theta_t = 1.0_f - (1.0_f - sqr(cos_theta_i)) / sqr(eta);
+	return select(mask && (sqr_cos_theta_t > 0.0_f),
+				  schlick_approximation(f0, cos_theta_i),
+				  1.0_f);
+}
+
+struct SpecBsdf : public Bsdf
+{
+	SpecBsdf(const SpectrumC & reflectance)
+	{
+	}
+
+	SpectrumC eval(const Real3C & in,
+				   const Real3C & out,
+				   const Real3C & texcoord,
+				   const BoolC & mask = true) const
+	{
+		const Real3C half = (in + out) / norm(in + out);
+
+		// compute F - fresnel reflection coefficient
+		const RealC eta = 1.0_f;
+		const SpectrumC value_F = schlick_approx(in.y(), eta, mask);
+
+		// compute G - geometric distribution / shadowing factor
+
+		// compute D - microfacet distribution term
+
+		return value_F;
+	}
+
+	std::tuple<SpectrumC, Real3C> sample(const Real3C & in,
+										 const Real3C & texcoord,
+										 const Real2C & sample,
+										 const BoolC & mask = true) const override
+	{
+		const Real3C outgoing = cosine_weighted_hemisphere_from_square(sample);
+		const SpectrumC contrib = eval(in, outgoing, texcoord, mask) * M_PI_f;
+		return std::make_tuple(contrib, outgoing);
+	}
+};
+
+struct DiffuseBsdf : public Bsdf
+{
+	DiffuseBsdf(const SpectrumC & reflectance)
+	{
+	}
+
+	SpectrumC eval(const Real3C & in,
+				   const Real3C & out,
+				   const Real3C & texcoord,
+				   const BoolC & mask = true) const
+	{
+		// Brent Burley 2015 eq.4 
+		const SpectrumC base_color = 1.0_f;
+		const SpectrumC roughness = 1.0_f;
+		const Real3C half = norm(in + out);
+		const RealC cos_theta_d = half.y();
+		const SpectrumC rr = 2.0_f * roughness * sqr(cos_theta_d);
+		const SpectrumC fv = schlick_weight(abs(in.y()));
+		const SpectrumC fl = schlick_weight(abs(out.y()));
+		const SpectrumC f_lambert = base_color * M_1_PI_f * (1.0_f - 0.5_f * fl) * (1.0_f - 0.5_f * fv);
+		const SpectrumC f_retro_reflect = base_color * M_1_PI_f * rr * (fl + fv + fl * fv * (rr - 1.0_f));
+		const SpectrumC f_d = f_lambert + f_retro_reflect;
+		return f_d;
+	}
+
+	std::tuple<SpectrumC, Real3C> sample(const Real3C & in,
+										 const Real3C & texcoord,
+										 const Real2C & sample,
+										 const BoolC & mask = true) const override
+	{
+		const Real3C outgoing = cosine_weighted_hemisphere_from_square(sample);
+		const SpectrumC contrib = eval(in, outgoing, texcoord, mask) * M_PI_f;
+		return std::make_tuple(contrib, outgoing);
+	}
+};
+
+/*
+struct ABsdf : public Bsdf
+{
+	SpectrumC eval_diffuse_fresnel(const SpectrumC & base_color,
+					const Real3C & roughness,
+					const RealC & cos_theta_d,
+					const RealC & cos_theta_l,
+					const RealC & cos_theta_v) const
+	{
+		const SpectrumC FD90 = 0.5_f + 2.0_f * roughness * sqr(cos_theta_d);
+		const SpectrumC t1 = 1.0_f + (FD90 - 1.0_f) * pow(1.0_f - cos_theta_l, 5);
+		const SpectrumC t2 = 1.0_f + (FD90 - 1.0_f) * pow(1.0_f - cos_theta_v, 5);
+		const SpectrumC fd = base_color * M_1_PI_f * t1 * t2;
+	}
+
+	SpectrumC eval(const Real3C & incoming,
+				   const Real3C & texcoord,
+				   const BoolC & mask = true) const
+	{
+	}
+
+	std::tuple<SpectrumC, Real3C> sample(const Real3C & incoming,
+										 const Real3C & texcoord,
+										 const Real2C & sample,
+										 const BoolC & mask = true) const override
+	{
+	}
+};
+*/
 
 template <typename T>
 std::vector<T *> raw_ptrs(const std::vector<std::shared_ptr<T>> & shared_ptrs)
@@ -128,7 +260,7 @@ std::tuple<
 	std::vector<int3>, /* per face texcoord indices */
 	std::vector<float2>, /* texcoord */
 	std::vector<int>, /* per triangle material id */
-	std::vector<std::shared_ptr<LambertBsdf>>> load_meshes(const std::filesystem::path & path)
+	std::vector<std::shared_ptr<Bsdf>>> load_meshes(const std::filesystem::path & path)
 {
 	// load mesh
 	tinyobj::ObjReader obj_reader;
@@ -216,10 +348,11 @@ std::tuple<
 	const size_t num_materials = tiny_mat.size();
 	
 	// init materials vector
-	std::vector<std::shared_ptr<LambertBsdf>> materials(num_materials + 1);
+	std::vector<std::shared_ptr<Bsdf>> materials(num_materials + 1);
 
 	// start with default material at 0
 	materials[0] = std::make_shared<LambertBsdf>(Spectrum(0.5_f));
+	//materials[0] = std::make_shared<DiffuseBsdf>(Spectrum(0.5_f));
 
 	// push the rest of materials
 	for (size_t i_material = 0; i_material < num_materials; i_material++)
@@ -228,6 +361,7 @@ std::tuple<
 		const Real g = tiny_mat[i_material].diffuse[1];
 		const Real b = tiny_mat[i_material].diffuse[2];
 		materials[i_material + 1] = std::make_shared<LambertBsdf>(Spectrum(r, g, b));
+		//materials[i_material + 1] = std::make_shared<DiffuseBsdf>(Spectrum(0.5_f));
 	}
 
 	return std::make_tuple(position_triplets, positions,
@@ -237,6 +371,37 @@ std::tuple<
 }
 
 #include "enoki_entry.h"
+
+struct Interaction
+{
+	Interaction(const Real3C & position,
+				const Real3C & shading_normal,
+				const Real3C & geometry_normal,
+				const Real3C & texcoord,
+				const BoolC & is_in_medium,
+				const BsdfPtrC & scatter,
+				const BoolC & has_light,
+				const LightPtrC & light):
+		m_position(position),
+		m_shading_normal(shading_normal),
+		m_geometry_normal(geometry_normal),
+		m_texcoord(texcoord),
+		m_is_in_medium(is_in_medium),
+		m_scatter(scatter),
+		m_has_light(has_light),
+		m_light(light)
+	{
+	}
+
+	Real3C			m_position;
+	Real3C			m_shading_normal;
+	Real3C			m_geometry_normal;
+	Real3C			m_texcoord;
+	BoolC			m_is_in_medium;
+	BsdfPtrC		m_scatter;
+	BoolC			m_has_light;
+	LightPtrC		m_light;
+};
 
 struct Scene
 {
@@ -259,17 +424,39 @@ struct Scene
 		m_texcoord_triplets = IntC::copy(texcoord_triplets_host.data(), 3 * texcoord_triplets_host.size());
 		m_texcoords = RealC::copy(texcoords_host.data(), 2 * texcoords_host.size());
 
-		m_materials = std::vector<std::shared_ptr<Bsdf>>(materials_host.begin(), materials_host.end());
+		m_materials_host = materials_host;
 		m_material_id = IntC::copy(per_face_material_id.data(), per_face_material_id.size());
-		m_d_materials = CUDAArray<Bsdf *>::copy(raw_ptrs(m_materials).data(), m_materials.size());
+		m_materials = CUDAArray<Bsdf *>::copy(raw_ptrs(m_materials_host).data(), m_materials_host.size());
 	}
 
 	void commit()
 	{
 		m_optix_backend.init();
 		m_optix_backend.set_triangles_soup(&m_position_triplets, &m_positions,
-										 &m_shading_normal_triplets, &m_shading_normals,
-										 &m_texcoord_triplets, &m_texcoords);
+										   &m_shading_normal_triplets, &m_shading_normals,
+										   &m_texcoord_triplets, &m_texcoords);
+	}
+
+	std::tuple<Interaction, BoolC> intersect(const Ray3C & ray, const BoolC & active)
+	{
+		auto [hit_info, is_intersect] = m_optix_backend.intersect(ray, active);
+
+		// fetch bsdf
+		const IntC mat_index = gather<IntC>(m_material_id, hit_info.m_tri_id, active);
+		const BsdfPtrC bsdf = gather<CUDAArray<Bsdf *>>(m_materials, mat_index, active);
+
+		// make result
+		Interaction result(hit_info.m_position,
+						   hit_info.m_shading_normal,
+						   hit_info.m_geometry_normal,
+						   Real3C(hit_info.m_texcoord.x(), hit_info.m_texcoord.y(), 0.0_f),
+						   false,
+						   bsdf,
+						   false,
+						   nullptr);
+
+		// return
+		return std::make_tuple(result, is_intersect);
 	}
 
 	IntC								m_position_triplets;
@@ -279,16 +466,16 @@ struct Scene
 	RealC								m_texcoords;
 	IntC								m_texcoord_triplets;
 	IntC								m_material_id;
-	CUDAArray<Bsdf *>					m_d_materials;
-	std::vector<std::shared_ptr<Bsdf>>	m_materials;
+	BsdfPtrC							m_materials;
+	std::vector<std::shared_ptr<Bsdf>>	m_materials_host;
 	OptixBackend						m_optix_backend;
 };
 
 int main()
 {
 	// all const
-	const int width = 1920;
-	const int height = 1080;
+	const int width = 512;
+	const int height = 512;
 	const int num_pixels = width * height;
 	const int num_samples = 100;
 	const int num_bounces = 5;
@@ -332,10 +519,9 @@ int main()
 		for (int j = 0; j < num_bounces; j++)
 		{
 			// make ray
-			const Ray3C rays(origin, direction);
+			const Ray3C ray(origin, direction);
 
-			// intersection test
-			auto [hit_info, is_intersect] = scene.m_optix_backend.intersect(rays, active);
+			auto [interaction, is_intersect] = scene.intersect(ray, active);
 
 			// check if hit lightsource
 			film += select(!is_intersect && active, contrib, full<SpectrumC>(0.0_f, num_pixels));
@@ -345,20 +531,16 @@ int main()
 
 			// create coord frame
 			const Real2C scatter_sample = Real2C(rng.next_float32(), rng.next_float32());
-			const Frame3C coord_frame(hit_info.m_shading_normal);
-
-			// fetch bsdf
-			const IntC mat_index = gather<IntC>(scene.m_material_id, hit_info.m_tri_id, active);
-			const CUDAArray<Bsdf *> bsdf = gather<CUDAArray<Bsdf *>>(scene.m_d_materials, mat_index, active);
+			const Frame3C coord_frame(interaction.m_shading_normal);
 
 			// sample outgoing direction
 			const Real3C incoming_local = coord_frame.to_local(-direction, active);
-			auto [bsdf_contrib, outgoing_local] = bsdf->sample(incoming_local, scatter_sample, active);
+			auto [bsdf_contrib, outgoing_local] = interaction.m_scatter->sample(incoming_local, interaction.m_texcoord, scatter_sample, active);
 			const Real3C outgoing = coord_frame.to_world(outgoing_local, active);
 
 			// update variables for next bounce
 			contrib *= bsdf_contrib;
-			origin = hit_info.m_position;
+			origin = interaction.m_position;
 			direction = outgoing;
 		}
 	}
