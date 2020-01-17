@@ -131,13 +131,46 @@ RealC schlick_approximation(const RealC & f0, const RealC & cos_theta)
 
 SpectrumC schlick_approx(const RealC & cos_theta_i,
 						 const RealC & eta,
-						 const BoolC & mask = 0)
+						 const BoolC & mask = true)
 {
 	const RealC f0 = sqr((1.0_f - eta) / (1.0_f + eta));
 	const RealC sqr_cos_theta_t = 1.0_f - (1.0_f - sqr(cos_theta_i)) / sqr(eta);
 	return select(mask && (sqr_cos_theta_t > 0.0_f),
 				  schlick_approximation(f0, cos_theta_i),
 				  1.0_f);
+}
+
+RealC abs_cos_theta(const Real3C & w)
+{
+	return w.y();
+}
+
+RealC abs_sin_theta(const Real3C & w)
+{
+	return sqrt(1.0_f - sqr(abs_cos_theta(w)));
+}
+
+RealC abs_tan_theta(const Real3C & w)
+{
+	return abs_sin_theta(w) / abs_cos_theta(w);
+}
+
+RealC abs_sin_phi(const Real3C & w)
+{
+	return w.x() / abs_sin_theta(w);
+}
+
+RealC abs_cos_phi(const Real3C & w)
+{
+	return w.z() / abs_sin_theta(w);
+}
+
+SpectrumC trowbridge_reitz_lambda(const Real3C & w)
+{
+	// refers to "anisotropic ggx distribution" equation 86 in heitz JCGT note
+	//RealC alpha0 = sqrt(abs_cos_phi(w));
+	//RealC a = 1.0_f / (abs_tan_theta(w) * );
+	return SpectrumC(0.0_f);
 }
 
 struct SpecBsdf : public Bsdf
@@ -159,19 +192,18 @@ struct SpecBsdf : public Bsdf
 
 		// compute G - geometric distribution / shadowing factor
 
-
 		// compute D - microfacet distribution term
 
 		return f_term;
 	}
 
-	std::tuple<SpectrumC, Real3C> sample(const Real3C & in,
+	std::tuple<SpectrumC, Real3C> sample(const Real3C & v,
 										 const Real3C & texcoord,
 										 const Real2C & sample,
 										 const BoolC & mask = true) const override
 	{
 		const Real3C outgoing = cosine_weighted_hemisphere_from_square(sample);
-		const SpectrumC contrib = eval(in, outgoing, texcoord, mask) * M_PI_f;
+		const SpectrumC contrib = eval(v, outgoing, texcoord, mask) * M_PI_f;
 		return std::make_tuple(contrib, outgoing);
 	}
 };
