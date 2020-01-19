@@ -145,9 +145,19 @@ RealC abs_cos_theta(const Real3C & w)
 	return w.y();
 }
 
+RealC sqr_cos_theta(const Real3C & w)
+{
+	return sqr(w.y());
+}
+
+RealC sqr_sin_theta(const Real3C & w)
+{
+	return 1.0_f - sqr(w.y());
+}
+
 RealC abs_sin_theta(const Real3C & w)
 {
-	return sqrt(1.0_f - sqr(abs_cos_theta(w)));
+	return sqrt(1.0_f - sqr(w.y()));
 }
 
 RealC abs_tan_theta(const Real3C & w)
@@ -165,12 +175,42 @@ RealC abs_cos_phi(const Real3C & w)
 	return w.z() / abs_sin_theta(w);
 }
 
-SpectrumC trowbridge_reitz_lambda(const Real3C & w)
+RealC sqr_sin_phi(const Real3C & w)
+{
+	return sqr(w.x()) / sqr_sin_theta(w);
+}
+
+RealC sqr_cos_phi(const Real3C & w)
+{
+	return sqr(w.z()) / sqr_sin_theta(w);
+}
+
+SpectrumC trowbridge_reitz_lambda(const Real3C & w,
+								  const RealC & alpha_x,
+								  const RealC & alpha_y)
 {
 	// refers to "anisotropic ggx distribution" equation 86 in heitz JCGT note
-	//RealC alpha0 = sqrt(abs_cos_phi(w));
-	//RealC a = 1.0_f / (abs_tan_theta(w) * );
-	return SpectrumC(0.0_f);
+	const RealC sqr_alpha0 = sqr_cos_phi(w) * sqr(alpha_x) + sqr_sin_phi(w) * sqr(alpha_y);
+	const RealC alpha0 = sqrt(sqr_alpha0);
+	const RealC a = rcp(alpha0 * abs_tan_theta(w));
+	const RealC numerator = -1.0_f + sqrt(1.0_f + rcp(sqr(a)));
+	const RealC denominator = 2.0_f;
+	return numerator / denominator;
+}
+
+SpectrumC trowbridge_reitz_g1(const Real3C & w,
+							  const RealC & alpha_x,
+							  const RealC & alpha_y)
+{
+	return rcp(1.0_f + trowbridge_reitz_lambda(w, alpha_x, alpha_y));
+}
+
+SpectrumC disney_g(const Real3C & v,
+				   const Real3C & l,
+				   const RealC & alpha_x,
+				   const RealC & alpha_y)
+{
+	return trowbridge_reitz_g1(v, alpha_x, alpha_y) * trowbridge_reitz_g1(l, alpha_x, alpha_y);
 }
 
 struct SpecBsdf : public Bsdf
@@ -188,9 +228,10 @@ struct SpecBsdf : public Bsdf
 
 		// compute F - fresnel reflection coefficient
 		const RealC eta = 1.0_f;
-		const SpectrumC f_term = schlick_approx(v.y(), eta, mask);
+		const SpectrumC f_term = schlick_approx(abs_cos_theta(v), eta, mask);
 
 		// compute G - geometric distribution / shadowing factor
+		const SpectrumC g_term = disney_g(v, l, 1.0_f, 1.0_f);
 
 		// compute D - microfacet distribution term
 
